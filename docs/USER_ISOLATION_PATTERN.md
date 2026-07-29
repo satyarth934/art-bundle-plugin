@@ -75,17 +75,19 @@ When dispatched, agents receive two key parameters:
 
 ## MCP Tools for User Isolation
 
+**⚠️ IMPORTANT**: For exact tool signatures, return types, and optional parameters, consult `mcp_art_server.py` in ART_MCP as the single source of truth. The examples below show the core isolation patterns; implementation details may vary.
+
 ### ✅ USER-AWARE TOOLS
 
 These tools actively enforce user isolation by checking permissions:
 
-#### `get_user_projects(user_email: str) -> dict`
-- **Returns**: List of project slugs for the specified user only
+#### `get_user_projects(user_email: str)`
+- **Purpose**: List all projects for a specific user
 - **Safety**: Cannot list other users' projects
 - **Use**: To show users their previous projects
 ```python
-projects = get_user_projects(user_email="alice@example.com")
-# Returns: ["flaviolin_opt_v1", "media_opt_v2"]
+result = get_user_projects(user_email="alice@example.com")
+# Returns info about alice's projects
 ```
 
 #### `upload_script(filename: str, content: str, project_slug: str, user_email: str)`
@@ -103,7 +105,7 @@ upload_script(
 
 #### `upload_data_file(filename: str, content: str, project_slug: str, user_email: str)`
 - **Purpose**: Save a data file (CSV, JSON, etc.) to user's project
-- **Safety**: Automatically places in `/shared/user_impl_alpha/{user_email}/{project_slug}/data/`
+- **Safety**: Automatically places in user's project directory
 - **Use**: After generating configuration or data files
 ```python
 upload_data_file(
@@ -114,33 +116,33 @@ upload_data_file(
 )
 ```
 
-#### `list_shared_files(user_email: str, project_slug: str) -> list`
-- **Returns**: Files in the user's project only
+#### `list_shared_files(user_email: str, project_slug: str, ...)`
+- **Purpose**: List files in a user's project
 - **Safety**: Cannot list other users' files
 - **Use**: To discover what files exist in a project
 ```python
-files = list_shared_files(
+result = list_shared_files(
     user_email="alice@example.com",
     project_slug="flaviolin_opt_v1"
 )
-# Returns: ["robotic_instructions.csv", "stock_concentrations.csv", ...]
+# Returns files only from alice's project
 ```
 
-#### `download_file(filepath: str) -> bytes`
+#### `download_file(filepath: str)`
 - **Purpose**: Download a file from a project
-- **Safety**: Only accessible if user has permission (embedded in path)
+- **Safety**: Only accessible if user has permission (path-based isolation)
 - **Use**: To retrieve previously generated files
 ```python
-content = download_file(
+result = download_file(
     filepath="/shared/user_impl_alpha/alice@example.com/flaviolin_opt_v1/outputs/robotic_instructions.csv"
 )
 ```
 
 ### ⚪ GENERAL TOOLS
 
-These tools don't check user_email directly, but isolation is enforced via file paths:
+These tools don't require user_email directly, but isolation is enforced via file paths:
 
-#### `execute_code(script_path: str) -> str`
+#### `execute_code(script_path: str)`
 - **Purpose**: Run Python code in art-core container
 - **Safety**: Isolation determined by the script_path (must be in user's project directory)
 - **Use**: To execute generated scripts
