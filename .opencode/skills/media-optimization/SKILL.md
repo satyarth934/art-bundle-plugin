@@ -98,11 +98,29 @@ digraph media_optimization_pipeline {
 
 ### Phase Details
 
-#### Phase 0: Data Acquisition & Fast-Path Check (Main Agent)
+#### Phase 0: User Context & Data Acquisition (Main Agent)
 
-You should never start reading files in the main directory. Ask the auser if they want to start a new project or pick up from a previous project. Decide what the working direcotry is for this project will be, and once that's decided, all of the work needs to be done in that directory. This is a critical requirement to avoid cross-project contamination.
+**CRITICAL: Establish user and project context first.**
 
-Once the working directory is decided, use `coda-fast-mcp` or direct file reads to gather:
+Before starting any work, you MUST capture user context to ensure proper isolation:
+
+1. **User Email**: Ask for the user's email (e.g., scientist@lab.edu)
+   - Used to organize projects by user
+   - Enables multi-user workflows
+   - Example: `alice@example.com`
+
+2. **Project Slug**: Ask for a short, alphanumeric identifier for this experiment (e.g., `flaviolin_opt_cycle1`)
+   - Lowercase, alphanumeric, hyphens only
+   - Used to organize files: `/shared/user_impl_alpha/{email}/{slug}/`
+   - Example: `media_opt_v2`
+
+**All subsequent work must use**: `/shared/user_impl_alpha/{user_email}/{project_slug}/` as the project root directory.
+
+This is a critical requirement to avoid cross-project contamination and ensure user isolation.
+
+---
+
+Once user/project context is established, use `coda-fast-mcp` or direct file reads to gather:
 
 1. **Standard recipe CSV** -- must contain columns: `Component`, `Concentration`, `Solubility`.
 2. **Training data CSV** -- historical experimental results with component concentrations and response variable(s). May be absent for initial cycles.
