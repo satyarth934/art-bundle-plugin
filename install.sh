@@ -61,29 +61,26 @@ log_error() {
 detect_opencode_config() {
     log_info "Step 1/5: Detecting OpenCode configuration location..."
     
-    # Check for local .opencode
+    # IMPORTANT: Only check for LOCAL .opencode directory
+    # We NEVER install globally to ~/.opencode (user home)
+    # This ensures project-level isolation and cleanliness
+    
     if [ -d ".opencode" ]; then
         OPENCODE_DIR=".opencode"
         log_success "Found local .opencode directory"
         return 0
     fi
     
-    # Check for ~/.opencode
-    if [ -d "$HOME/.opencode" ]; then
-        OPENCODE_DIR="$HOME/.opencode"
-        log_success "Found ~/.opencode directory"
-        return 0
-    fi
-    
-    # If neither found, prompt user
-    log_error "Could not find OpenCode configuration directory"
+    # If local .opencode not found, ask user to create it
+    log_error "Could not find local .opencode directory"
     echo ""
-    echo "Please create one:"
-    echo "  Option 1: Local directory"
-    echo "    mkdir .opencode"
+    echo "This script ONLY installs to LOCAL project directories."
+    echo "Global installation is NOT supported."
     echo ""
-    echo "  Option 2: User home directory"
-    echo "    mkdir ~/.opencode"
+    echo "Please create a local .opencode directory:"
+    echo "  mkdir .opencode"
+    echo ""
+    echo "Then run this script again."
     echo ""
     exit 1
 }
