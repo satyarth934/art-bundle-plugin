@@ -1,0 +1,45 @@
+// ART Bundle Plugin - MCP Configuration Template
+// 
+// This file shows how to configure the MCP server in your opencode.json
+// The install.sh script will automatically merge this configuration.
+//
+// If you need to manually configure, add this to your ~/.opencode/opencode.json:
+
+{
+  "mcpServers": {
+    "art-mcp": {
+      // MCP Server Configuration for ART (Automated Recommendation Tool)
+      // 
+      // Type: The communication protocol
+      // Current: "stdio" via HTTP (Cloud Run service)
+      "type": "stdio",
+      
+      // Command: How to connect to the server
+      // Uses curl to reach the Cloud Run service
+      "command": "curl",
+      
+      // Arguments: Connection details
+      // Connects to the art-mcp Cloud Run service
+      "args": [
+        "--unix-socket",
+        "/tmp/art-mcp.sock",
+        "http://localhost/mcp"
+      ],
+      
+      // Optional: Environment variables for authentication
+      // If your MCP server requires API keys or tokens:
+      // "env": {
+      //   "MCP_API_KEY": "your-api-key-here"
+      // }
+      
+      // Optional: Enable debug logging
+      // "debug": true
+    }
+  },
+  
+  // Optional: If you have multiple MCP servers, list them here:
+  // "mcpServers": {
+  //   "art-mcp": { ... },
+  //   "other-mcp": { ... }
+  // }
+}
