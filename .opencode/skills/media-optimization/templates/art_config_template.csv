@@ -1,0 +1,16 @@
+Parameter,Value
+initial_cycle,
+target_for_optimization,
+strategy,maximize
+components_for_optimization,
+bounds_file,feasible_bounds.csv
+exploitation_recs,
+exploration_recs,
+num_recommendations,
+niter,100000
+num_tpot_models,0
+max_mcmc_cores,4
+cross_val_partitions,5
+rel_rec_distance,0.3
+result_suffix,_cycle
+seed,42
