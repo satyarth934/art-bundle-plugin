@@ -4,6 +4,20 @@
 
 ---
 
+## ⚠️ IMPORTANT: Project-Level Installation Only
+
+This plugin **ONLY installs at the project level** to `.opencode/` in your current directory.
+
+**Global installation to `~/.opencode/` is NOT supported.**
+
+All configuration and files are local to your project. This ensures:
+- ✅ Clean project organization
+- ✅ No conflicts with other projects
+- ✅ Easy to manage multiple experiments
+- ✅ Simple cleanup (just delete the project directory)
+
+---
+
 ## What Was Installed
 
 ✅ **Skills**:
@@ -29,7 +43,7 @@
 
 If your MCP server requires API keys:
 
-**Edit your OpenCode configuration** (`~/.opencode/opencode.json`):
+**Edit your local OpenCode configuration** (`.opencode/opencode.json` in your project directory):
 
 ```json
 {
@@ -82,7 +96,7 @@ This will log:
 
 ```bash
 # Check skills installed
-ls ~/.opencode/skills/media-optimization/
+ls .opencode/skills/media-optimization/
 
 # Expected output:
 # SKILL.md
@@ -90,7 +104,7 @@ ls ~/.opencode/skills/media-optimization/
 # templates/
 
 # Check agents installed
-ls ~/.opencode/agents/*.md | grep -E "(art|liquid|vantage|literature|subtask)"
+ls .opencode/agents/*.md | grep -E "(art|liquid|vantage|literature|subtask)"
 
 # Expected: 5 agent files listed
 ```
@@ -99,7 +113,7 @@ ls ~/.opencode/agents/*.md | grep -E "(art|liquid|vantage|literature|subtask)"
 
 ```bash
 # View MCP server configuration
-cat ~/.opencode/opencode.json | grep -A 10 "art-mcp"
+cat .opencode/opencode.json | grep -A 10 "art-mcp"
 
 # Should show: type, command, args for art-mcp
 ```
@@ -170,14 +184,14 @@ Same project name, but complete data isolation!
 **Solutions**:
 1. Check your OpenCode directory exists:
    ```bash
-   ls -la ~/.opencode/
+   ls -la .opencode/
    # or
    ls -la .opencode/
    ```
 
 2. Create it if missing:
    ```bash
-   mkdir -p ~/.opencode/{skills,agents}
+   mkdir -p .opencode/{skills,agents}
    ```
 
 3. Re-run `install.sh`:
@@ -215,7 +229,7 @@ Same project name, but complete data isolation!
 **Solutions**:
 1. Verify files are installed:
    ```bash
-   ls ~/.opencode/skills/media-optimization/SKILL.md
+   ls .opencode/skills/media-optimization/SKILL.md
    # Should exist, not show "No such file"
    ```
 
@@ -229,7 +243,7 @@ Same project name, but complete data isolation!
 3. Check for syntax errors in SKILL.md:
    ```bash
    # Verify YAML front matter is valid
-   head -10 ~/.opencode/skills/media-optimization/SKILL.md
+   head -10 .opencode/skills/media-optimization/SKILL.md
    # Should show: --- at start, proper YAML metadata
    ```
 
@@ -240,14 +254,14 @@ Same project name, but complete data isolation!
 **Solutions**:
 1. Verify agent files exist:
    ```bash
-   ls ~/.opencode/agents/art-specialist.md
-   ls ~/.opencode/agents/liquid-handler-specialist.md
+   ls .opencode/agents/art-specialist.md
+   ls .opencode/agents/liquid-handler-specialist.md
    # etc.
    ```
 
 2. Check agent YAML is valid:
    ```bash
-   head -25 ~/.opencode/agents/art-specialist.md
+   head -25 .opencode/agents/art-specialist.md
    # Should have proper YAML metadata
    ```
 
@@ -363,7 +377,7 @@ Key files to read:
 
 Pre-built templates for common tasks:
 ```bash
-ls ~/.opencode/skills/media-optimization/templates/
+ls .opencode/skills/media-optimization/templates/
 
 # Examples:
 # - art_config_template.csv
@@ -409,16 +423,16 @@ Located in `.opencode/agents/`:
 
 ```bash
 # View MCP configuration
-cat ~/.opencode/opencode.json
+cat .opencode/opencode.json
 
 # List installed skills
-ls ~/.opencode/skills/
+ls .opencode/skills/
 
 # List installed agents
-ls ~/.opencode/agents/
+ls .opencode/agents/
 
 # View skill documentation
-cat ~/.opencode/skills/media-optimization/SKILL.md
+cat .opencode/skills/media-optimization/SKILL.md
 
 # Test MCP connectivity
 curl https://art-mcp-1005318772721.us-west1.run.app/mcp

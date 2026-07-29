@@ -25,19 +25,24 @@ This plugin provides everything you need to design and execute media optimizatio
 
 ### 2. Install the Plugin
 
+**IMPORTANT**: This plugin ONLY installs at the project level (local `.opencode/` directory). Global installation to `~/.opencode/` is NOT supported.
+
 ```bash
 # Clone or download this repository
 git clone <repository-url> art-bundle-plugin
 cd art-bundle-plugin
+
+# Create local OpenCode directory
+mkdir .opencode
 
 # Run the installation script
 ./install.sh
 ```
 
 The script will:
-- Detect your OpenCode configuration location
-- Copy skills and agents to your OpenCode directory
-- Configure MCP server connection
+- Find your local `.opencode/` directory
+- Copy skills and agents to your project
+- Configure MCP server connection locally
 - Verify connectivity
 
 ### 3. Verify Installation
@@ -77,25 +82,29 @@ The skill will prompt you for:
 
 ### What Gets Installed
 
+Files are installed to your **local project directory** (`.opencode/`), not globally:
+
 ```
-~/.opencode/
+.opencode/                           ← Local to your project
 ├── skills/
-│   └── media-optimization/        ← Your new skill
-│       ├── SKILL.md               ← Orchestration guide
-│       ├── templates/             ← 14 template files
+│   └── media-optimization/          ← Your new skill
+│       ├── SKILL.md                 ← Orchestration guide
+│       ├── templates/               ← 14 template files
 │       └── media-optimization-reference.md
 │
 └── agents/
-    ├── art-specialist.md          ← New agents
+    ├── art-specialist.md            ← New agents
     ├── liquid-handler-specialist.md
     ├── vantage-handler.md
     ├── literature-reviewer.md
     └── subtask-generalist.md
 ```
 
+**IMPORTANT**: Installation is always PROJECT-LEVEL only. There is NO global installation mode.
+
 ### Configuration
 
-MCP server configuration is automatically added to `~/.opencode/opencode.json`:
+MCP server configuration is automatically added to your **local project** `opencode.json`:
 
 ```json
 {
