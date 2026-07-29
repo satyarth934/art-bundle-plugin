@@ -125,14 +125,15 @@ merge_mcp_config() {
     OPENCODE_JSON="$OPENCODE_DIR/opencode.json"
     OPENCODE_JSONC="$OPENCODE_DIR/opencode.jsonc"
     
-    # Determine which config file to use
-    if [ -f "$OPENCODE_JSON" ]; then
-        CONFIG_FILE="$OPENCODE_JSON"
-    elif [ -f "$OPENCODE_JSONC" ]; then
+    # Determine which config file to use (prefer JSONC over JSON)
+    if [ -f "$OPENCODE_JSONC" ]; then
         CONFIG_FILE="$OPENCODE_JSONC"
+    elif [ -f "$OPENCODE_JSON" ]; then
+        CONFIG_FILE="$OPENCODE_JSON"
     else
         log_warning "No opencode.json(c) found, creating new configuration"
-        CONFIG_FILE="$OPENCODE_JSON"
+        # Default to JSONC for new configurations (supports comments)
+        CONFIG_FILE="$OPENCODE_JSONC"
         cat > "$CONFIG_FILE" << 'EOF'
 {
   "mcpServers": {}
