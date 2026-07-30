@@ -8,19 +8,31 @@ set -e
 # This script installs the ART Bundle Plugin into your OpenCode environment.
 #
 # Usage:
-#   ./install.sh
+#   Option 1: Direct execution (if you have cloned the repo)
+#     ./install.sh
+#
+#   Option 2: One-command installation via curl (recommended)
+#     curl -fsSL https://raw.githubusercontent.com/JBEI/art-bundle-plugin/<COMMIT_SHA>/install.sh | bash
+#     (Replace <COMMIT_SHA> with actual commit hash - see README.md)
 #
 # Requirements:
 #   - OpenCode must be installed
-#   - ~/.opencode or ./.opencode directory must exist
+#   - Local .opencode/ directory (script will create if missing)
+#   - git command available
 #   - curl command available for connectivity testing
 #
 # What this script does:
-#   1. Detects your OpenCode configuration location
-#   2. Copies skills and agents to your installation
-#   3. Merges MCP configuration into opencode.json
-#   4. Tests connectivity to the MCP server
-#   5. Displays next steps
+#   1. Clones repository (if not already present)
+#   2. Creates .opencode/ directory (if missing)
+#   3. Detects if already installed (prevents duplicate installs)
+#   4. Copies skills and agents to your installation
+#   5. Merges MCP configuration into opencode.json(c)
+#   6. Tests connectivity to the MCP server
+#   7. Displays next steps
+#
+# Supply Chain Security:
+#   This script pins to a specific commit SHA to protect against
+#   supply chain attacks. See docs/DESIGN_CHOICES.md for details.
 # ============================================================================
 
 # Colors for output
@@ -30,9 +42,29 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration
+# ============================================================================
+# Configuration & Constants
+# ============================================================================
+
+# SECURITY: Commit SHA is pinned for supply chain security
+# Update this when releasing new versions
+# See docs/DESIGN_CHOICES.md for rationale
+COMMIT_SHA="main"  # TODO: Replace with actual commit SHA on release (e.g., "a1b2c3d4e5f6...")
+
+# Repository configuration
+REPO_URL="https://github.com/JBEI/art-bundle-plugin.git"
 ART_MCP_URL="https://art-mcp-1005318772721.us-west1.run.app/mcp"
-PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Detect if running from extracted repo or being piped via curl
+if [ -f "install.sh" ] && [ -d ".opencode" ]; then
+    # Running from extracted/cloned repository
+    PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_CLONED=true
+else
+    # Being piped via curl - need to clone repository
+    PLUGIN_DIR="/tmp/art-bundle-plugin-install"
+    REPO_CLONED=false
+fi
 
 # ============================================================================
 # Helper Functions
@@ -55,33 +87,100 @@ log_error() {
 }
 
 # ============================================================================
+# Repository Setup (handles both direct execution and curl piping)
+# ============================================================================
+
+ensure_repository_available() {
+    log_info "Step 0/5: Ensuring plugin files are available..."
+    
+    if [ "$REPO_CLONED" = true ]; then
+        log_success "Running from extracted plugin directory"
+        return 0
+    fi
+    
+    # Being piped via curl - need to clone repository
+    log_info "Cloning plugin repository..."
+    
+    if ! command -v git &> /dev/null; then
+        log_error "git command not found. Please install git and try again."
+        exit 1
+    fi
+    
+    # Clone with depth 1 for minimal download
+    git clone --depth 1 "$REPO_URL" "$PLUGIN_DIR" 2>/dev/null || {
+        log_error "Failed to clone repository from $REPO_URL"
+        exit 1
+    }
+    
+    # Checkout specific commit SHA for security
+    if [ "$COMMIT_SHA" != "main" ]; then
+        cd "$PLUGIN_DIR"
+        git fetch --depth 1 origin "$COMMIT_SHA" 2>/dev/null || {
+            log_error "Failed to fetch commit $COMMIT_SHA"
+            exit 1
+        }
+        git checkout "$COMMIT_SHA" 2>/dev/null || {
+            log_error "Failed to checkout commit $COMMIT_SHA"
+            exit 1
+        }
+    fi
+    
+    log_success "Plugin files ready"
+}
+
+# ============================================================================
+# Idempotency Check (prevent duplicate installations)
+# ============================================================================
+
+check_already_installed() {
+    # Check if media-optimization skill already exists
+    # This indicates a previous successful installation
+    if [ -f ".opencode/skills/media-optimization/SKILL.md" ]; then
+        log_warning "Installation already exists: .opencode/skills/media-optimization/ found"
+        echo ""
+        echo "This project appears to already have the ART Bundle Plugin installed."
+        echo "Skipping installation to prevent overwriting existing configuration."
+        echo ""
+        echo "If you want to reinstall:"
+        echo "  1. Remove the .opencode directory: rm -rf .opencode"
+        echo "  2. Run this script again"
+        echo ""
+        exit 0
+    fi
+}
+
+# ============================================================================
+# Create Local OpenCode Directory
+# ============================================================================
+
+ensure_opencode_dir() {
+    if [ ! -d ".opencode" ]; then
+        log_info "Creating local .opencode directory..."
+        mkdir -p ".opencode"
+        log_success "Created .opencode directory"
+    fi
+}
+
+# ============================================================================
 # Step 1: Detect OpenCode Configuration Location
 # ============================================================================
 
 detect_opencode_config() {
-    log_info "Step 1/5: Detecting OpenCode configuration location..."
+    log_info "Step 1/5: Confirming local .opencode directory..."
     
-    # IMPORTANT: Only check for LOCAL .opencode directory
+    # IMPORTANT: Only use LOCAL .opencode directory
     # We NEVER install globally to ~/.opencode (user home)
     # This ensures project-level isolation and cleanliness
     
     if [ -d ".opencode" ]; then
         OPENCODE_DIR=".opencode"
-        log_success "Found local .opencode directory"
+        log_success "Using local .opencode directory"
         return 0
     fi
     
-    # If local .opencode not found, ask user to create it
-    log_error "Could not find local .opencode directory"
-    echo ""
-    echo "This script ONLY installs to LOCAL project directories."
-    echo "Global installation is NOT supported."
-    echo ""
-    echo "Please create a local .opencode directory:"
-    echo "  mkdir .opencode"
-    echo ""
-    echo "Then run this script again."
-    echo ""
+    # This should not happen since ensure_opencode_dir() runs first
+    # But if we get here, something is wrong
+    log_error "Local .opencode directory missing"
     exit 1
 }
 
@@ -270,10 +369,28 @@ main() {
     echo "=========================================================================="
     echo ""
     
+    # Step 0: Ensure repository is available (handles curl piping)
+    ensure_repository_available
+    
+    # Step 1: Create .opencode directory if needed
+    ensure_opencode_dir
+    
+    # Check if already installed (idempotency)
+    check_already_installed
+    
+    # Step 2: Detect OpenCode config location
     detect_opencode_config
+    
+    # Step 3: Copy files
     copy_files
+    
+    # Step 4: Merge MCP config
     merge_mcp_config
+    
+    # Step 5: Test connectivity
     test_mcp_connectivity
+    
+    # Step 6: Show success message
     show_success_message
 }
 
