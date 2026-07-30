@@ -141,9 +141,10 @@ check_already_installed() {
         echo "This project appears to already have the ART Bundle Plugin installed."
         echo "Skipping installation to prevent overwriting existing configuration."
         echo ""
-        echo "If you want to reinstall:"
-        echo "  1. Remove the .opencode directory: rm -rf .opencode"
-        echo "  2. Run this script again"
+        echo "To reinstall the plugin (this only replaces the media-optimization skill,"
+        echo "preserving your other .opencode configurations):"
+        echo ""
+        echo "  rm -rf .opencode/skills/media-optimization && ./install.sh"
         echo ""
         exit 0
     fi
