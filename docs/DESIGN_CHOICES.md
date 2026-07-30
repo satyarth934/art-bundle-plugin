@@ -153,6 +153,21 @@ check_already_installed() {
 
 Checks for `.opencode/skills/media-optimization/SKILL.md` as the sentinel file indicating successful installation.
 
+### Granular Reinstall - Never Delete Entire .opencode
+
+**Critical Design Principle**: Users should ONLY reinstall the plugin skill, never the entire `.opencode/` directory.
+
+**Why**: Users may have personal configurations in `.opencode/` (other skills, custom agents, personal settings) that we must never disturb or suggest deleting.
+
+**Safe reinstall command** (plugin-only):
+```bash
+rm -rf .opencode/skills/media-optimization && ./install.sh
+```
+
+This preserves all other `.opencode/` content including custom skills, agents, and user configurations.
+
+The install script warning message explicitly recommends this granular approach and never suggests deleting the entire `.opencode/` directory.
+
 ### Future Improvements
 
 - [ ] **Upgrade support**: Detect existing installation and ask user if they want to upgrade
