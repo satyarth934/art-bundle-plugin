@@ -104,19 +104,30 @@ Files are installed to your **local project directory** (`.opencode/`), not glob
 
 ### Configuration
 
-MCP server configuration is automatically added to your **local project** `opencode.json`:
+MCP server configuration is automatically added to your **local project** `opencode.jsonc`:
 
 ```json
 {
-  "mcpServers": {
+  "mcp": {
     "art-mcp": {
-      "type": "stdio",
-      "command": "curl",
-      "args": ["--unix-socket", "/tmp/art-mcp.sock", "http://localhost/mcp"]
+      "type": "remote",
+      "url": "https://art-mcp-1005318772721.us-west1.run.app/mcp",
+      "headers": {
+        "Authorization": "Bearer {env:ARTMCP_AUTH_API_KEY}"
+      },
+      "enabled": true
     }
   }
 }
 ```
+
+**IMPORTANT**: You must set the `ARTMCP_AUTH_API_KEY` environment variable:
+
+```bash
+export ARTMCP_AUTH_API_KEY="your-api-key"
+```
+
+Without this, the MCP server will reject your requests. Contact your system administrator for the API key.
 
 If you need to manually configure, see `opencode-mcp-config.jsonc`.
 

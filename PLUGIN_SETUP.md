@@ -39,44 +39,54 @@ All configuration and files are local to your project. This ensures:
 
 ## Optional Configuration
 
-### 1. Enable MCP Authentication (If Required)
+### 1. Configure MCP Authentication (REQUIRED)
 
-If your MCP server requires API keys:
+**⚠️ IMPORTANT**: The ART-MCP Cloud Run service REQUIRES authentication.
 
-**Edit your local OpenCode configuration** (`.opencode/opencode.json` in your project directory):
+You MUST set the environment variable:
+
+```bash
+export ARTMCP_AUTH_API_KEY="your-api-key"
+```
+
+Get this key from your system administrator. Without it, MCP connections will fail.
+
+**How MCP is configured** (automatically done by `install.sh`):
+
+Your local OpenCode configuration (`.opencode/opencode.jsonc`) will contain:
 
 ```json
 {
-  "mcpServers": {
+  "mcp": {
     "art-mcp": {
-      "type": "stdio",
-      "command": "curl",
-      "args": ["--unix-socket", "/tmp/art-mcp.sock", "http://localhost/mcp"],
-      "env": {
-        "MCP_API_KEY": "your-api-key-here",
-        "MCP_AUTH_TOKEN": "bearer-token-if-needed"
-      }
+      "type": "remote",
+      "url": "https://art-mcp-1005318772721.us-west1.run.app/mcp",
+      "headers": {
+        "Authorization": "Bearer {env:ARTMCP_AUTH_API_KEY}"
+      },
+      "enabled": true
     }
   }
 }
 ```
 
-Or if using environment variables:
-```bash
-export MCP_API_KEY="your-api-key-here"
-export ARTMCP_AUTH_API_KEY="your-auth-key"
-```
+The `{env:ARTMCP_AUTH_API_KEY}` placeholder is automatically replaced with the value of your environment variable at runtime.
 
 ### 2. Configure Debug Logging (Optional)
 
 For troubleshooting agent behavior:
 
-**In your OpenCode configuration**:
+**In your OpenCode configuration** (`.opencode/opencode.jsonc`):
 ```json
 {
-  "mcpServers": {
+  "mcp": {
     "art-mcp": {
-      ...
+      "type": "remote",
+      "url": "https://art-mcp-1005318772721.us-west1.run.app/mcp",
+      "headers": {
+        "Authorization": "Bearer {env:ARTMCP_AUTH_API_KEY}"
+      },
+      "enabled": true,
       "debug": true
     }
   }
