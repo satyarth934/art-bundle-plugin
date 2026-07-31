@@ -12,7 +12,7 @@ set -e
 #     ./install.sh
 #
 #   Option 2: One-command installation via curl (recommended)
-#     curl -fsSL https://raw.githubusercontent.com/JBEI/art-bundle-plugin/<COMMIT_SHA>/install.sh | bash
+#     curl -fsSL https://raw.githubusercontent.com/satyarth934/art-bundle-plugin/<COMMIT_SHA>/install.sh | bash
 #     (Replace <COMMIT_SHA> with actual commit hash - see README.md)
 #
 # Requirements:
@@ -52,7 +52,7 @@ NC='\033[0m' # No Color
 COMMIT_SHA="main"  # TODO: Replace with actual commit SHA on release (e.g., "a1b2c3d4e5f6...")
 
 # Repository configuration
-REPO_URL="https://github.com/JBEI/art-bundle-plugin.git"
+REPO_URL="https://github.com/satyarth934/art-bundle-plugin.git"
 ART_MCP_URL="https://art-mcp-1005318772721.us-west1.run.app/mcp"
 
 # Detect if running from extracted repo or being piped via curl
@@ -259,22 +259,32 @@ const configFile = '$CONFIG_FILE';
 try {
     // Read existing config
     let config = {};
-    if (fs.existsSync(configFile)) {
+    const isNewConfig = !fs.existsSync(configFile);
+    
+    if (!isNewConfig) {
         const content = fs.readFileSync(configFile, 'utf8');
         // Simple JSON parse (ignores comments in JSONC)
         config = JSON.parse(content.replace(/\/\/.*$/gm, ''));
     }
     
-    // Ensure mcpServers object exists
-    if (!config.mcpServers) {
-        config.mcpServers = {};
+    // Add schema only if creating new config
+    if (isNewConfig) {
+        config['$schema'] = 'https://opencode.ai/config.json';
     }
     
-    // Add or update art-mcp configuration
-    config.mcpServers['art-mcp'] = {
-        type: 'stdio',
-        command: 'curl',
-        args: ['--unix-socket', '/tmp/art-mcp.sock', 'http://localhost/mcp']
+    // Initialize mcp object if needed
+    if (!config.mcp) {
+        config.mcp = {};
+    }
+    
+    // Configure remote MCP server for cloud-based ART-MCP
+    config.mcp['art-mcp'] = {
+        type: 'remote',
+        url: 'https://art-mcp-1005318772721.us-west1.run.app/mcp',
+        headers: {
+            'Authorization': 'Bearer {env:ARTMCP_AUTH_API_KEY}'
+        },
+        enabled: true
     };
     
     // Write updated config
@@ -341,9 +351,13 @@ show_success_message() {
     echo ""
     echo "Next Steps:"
     echo ""
-    echo "1. (Optional) Configure MCP Authentication:"
-    echo "   If your MCP server requires API keys, add to opencode.json:"
-    echo "   \"auth\": { \"apiKey\": \"your-api-key-here\" }"
+    echo "1. ⚠️  REQUIRED: Set MCP Authentication"
+    echo "   You must set the ARTMCP_AUTH_API_KEY environment variable:"
+    echo ""
+    echo "   export ARTMCP_AUTH_API_KEY=\"your-api-key-from-admin\""
+    echo ""
+    echo "   This key is required to communicate with the ART-MCP Cloud Run service."
+    echo "   Contact your system administrator if you don't have it."
     echo ""
     echo "2. Start Using the Plugin:"
     echo "   Run OpenCode and select the media-optimization skill"
