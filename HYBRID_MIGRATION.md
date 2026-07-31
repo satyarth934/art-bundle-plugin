@@ -111,7 +111,7 @@
              DIST_REPO_TOKEN: ${{ secrets.DIST_REPO_TOKEN }}
            run: |
              # Clone distribution repo
-             git clone https://x-access-token:$DIST_REPO_TOKEN@github.com/JBEI/art-bundle-plugin.git dist
+             git clone https://x-access-token:$DIST_REPO_TOKEN@github.com/satyarth934/art-bundle-plugin.git dist
              
              # Copy built files
              cp -r /tmp/art-bundle-plugin-build/* dist/
@@ -196,7 +196,7 @@
 
 ```
 GitHub:
-  - JBEI/art-bundle-plugin (distribution repo)
+  - satyarth934/art-bundle-plugin (distribution repo)
     ├── .opencode/
     ├── install.sh
     ├── README.md
@@ -205,14 +205,14 @@ GitHub:
 Maintenance:
   - Manual sync between ART_writing_agent and art-bundle-plugin
   - Manual push to distribution repo
-  - User clones from JBEI/art-bundle-plugin
+  - User clones from satyarth934/art-bundle-plugin
 ```
 
 ### v2 (Future - Hybrid)
 
 ```
 GitHub:
-  - JBEI/ART_MCP (source)
+  - satyarth934/ART_MCP (source)
     ├── art-bundle-plugin/        ← Source files move here
     │   ├── .opencode/
     │   ├── install.sh
@@ -220,7 +220,7 @@ GitHub:
     └── scripts/
         └── build-distribution.sh
 
-  - JBEI/art-bundle-plugin (distribution)
+  - satyarth934/art-bundle-plugin (distribution)
     ├── Auto-generated from build script
     ├── Triggers on ART_MCP changes
     └── Users still clone from here

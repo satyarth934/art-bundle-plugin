@@ -18,7 +18,7 @@ This document captures key design decisions made during the development of the A
 
 Users install via a single command:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JBEI/art-bundle-plugin/<COMMIT_SHA>/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/satyarth934/art-bundle-plugin/<COMMIT_SHA>/install.sh | bash
 ```
 
 The commit SHA is pinned inside the script itself for supply chain security.
