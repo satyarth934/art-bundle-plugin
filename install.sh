@@ -55,8 +55,9 @@ COMMIT_SHA="main"  # TODO: Replace with actual commit SHA on release (e.g., "a1b
 REPO_URL="https://github.com/satyarth934/art-bundle-plugin.git"
 ART_MCP_URL="https://art-mcp-1005318772721.us-west1.run.app/mcp"
 
-# Detect if running from extracted repo or being piped via curl
-if [ -f "install.sh" ] && [ -d ".opencode" ]; then
+# Detect if running from local `install.sh` or being piped via curl
+# if [ -f "install.sh" ] && [ -d ".opencode" ]; then
+if [ -f "install.sh" ]; then
     # Running from extracted/cloned repository
     PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     REPO_CLONED=true
@@ -93,6 +94,7 @@ log_error() {
 ensure_repository_available() {
     log_info "Step 0/5: Ensuring plugin files are available..."
     
+    # Exiting the function if the repository is already cloned
     if [ "$REPO_CLONED" = true ]; then
         log_success "Running from extracted plugin directory"
         return 0
@@ -106,6 +108,12 @@ ensure_repository_available() {
         exit 1
     fi
     
+    # Only clean the temp directory when being piped via curl
+    if [ "$REPO_CLONED" = false ]; then
+        rm -rf "$PLUGIN_DIR" 2>/dev/null
+        log_info "Cleaning any previous installation attempt..."
+    fi
+
     # Clone with depth 1 for minimal download
     git clone --depth 1 "$REPO_URL" "$PLUGIN_DIR" 2>/dev/null || {
         log_error "Failed to clone repository from $REPO_URL"
@@ -133,18 +141,49 @@ ensure_repository_available() {
 # ============================================================================
 
 check_already_installed() {
-    # Check if media-optimization skill already exists
-    # This indicates a previous successful installation
-    if [ -f ".opencode/skills/media-optimization/SKILL.md" ]; then
-        log_warning "Installation already exists: .opencode/skills/media-optimization/ found"
+    FRESH_INSTALL=true
+
+    # Dynamically check if any skills from plugin repo are already installed
+    # Scan the plugin repo's skills directory
+    if [ -d ".opencode/skills" ]; then
+        for skill_dir in ".opencode/skills"/*; do
+            if [ -d "$skill_dir" ]; then
+                skill_name=$(basename "$skill_dir")
+                if [ -f "$skill_dir/SKILL.md" ]; then
+                    log_warning "Skill already exists: $skill_name"
+                    FRESH_INSTALL=false
+                fi
+            fi
+        done
+    fi
+
+    # Dynamically check if any agents from plugin repo are already installed
+    # Scan the plugin repo's agents directory
+    if [ -d ".opencode/agents" ]; then
+        for agent_file in ".opencode/agents"/*.md; do
+            if [ -f "$agent_file" ]; then
+                agent_name=$(basename "$agent_file" .md)
+                log_warning "Agent already exists: $agent_name"
+                FRESH_INSTALL=false
+            fi
+        done
+    fi
+
+    if ! $FRESH_INSTALL; then
         echo ""
-        echo "This project appears to already have the ART Bundle Plugin installed."
+        echo "This project already appears to have the ART Bundle Plugin installed."
         echo "Skipping installation to prevent overwriting existing configuration."
         echo ""
-        echo "To reinstall the plugin (this only replaces the media-optimization skill,"
+        echo "To reinstall the plugin, delete the existing files using the following commands "
+        echo "(this only deletes the skills and agents corresponding to this plugin,"
         echo "preserving your other .opencode configurations):"
         echo ""
-        echo "  rm -rf .opencode/skills/media-optimization && ./install.sh"
+        for skill_path in "${skill_paths[@]}"; do
+            echo "  rm -rf $skill_path"
+        done
+        for agent_path in "${agent_paths[@]}"; do
+            echo "  rm -rf $agent_path"
+        done
         echo ""
         exit 0
     fi
@@ -196,19 +235,41 @@ copy_files() {
     mkdir -p "$OPENCODE_DIR/skills"
     mkdir -p "$OPENCODE_DIR/agents"
     
-    # Copy media-optimization skill
-    if [ -d "$PLUGIN_DIR/.opencode/skills/media-optimization" ]; then
-        cp -r "$PLUGIN_DIR/.opencode/skills/media-optimization" "$OPENCODE_DIR/skills/"
-        log_success "Copied media-optimization skill"
+    # Dynamically copy ALL skills from plugin repo
+    if [ -d "$PLUGIN_DIR/.opencode/skills" ]; then
+        skill_count=0
+        for skill_dir in "$PLUGIN_DIR/.opencode/skills"/*; do
+            if [ -d "$skill_dir" ]; then
+                skill_name=$(basename "$skill_dir")
+                cp -r "$skill_dir" "$OPENCODE_DIR/skills/"
+                log_success "Copied skill: $skill_name"
+                ((skill_count++))
+            fi
+        done
+        if [ $skill_count -eq 0 ]; then
+            log_error "No skills found in plugin"
+            exit 1
+        fi
     else
-        log_error "media-optimization skill not found in plugin"
+        log_error "skills directory not found in plugin"
         exit 1
     fi
     
-    # Copy agents
+    # Dynamically copy ALL agents from plugin repo
     if [ -d "$PLUGIN_DIR/.opencode/agents" ]; then
-        cp "$PLUGIN_DIR/.opencode/agents"/*.md "$OPENCODE_DIR/agents/" 2>/dev/null || true
-        log_success "Copied agent specifications"
+        agent_count=0
+        for agent_file in "$PLUGIN_DIR/.opencode/agents"/*.md; do
+            if [ -f "$agent_file" ]; then
+                agent_name=$(basename "$agent_file")
+                cp "$agent_file" "$OPENCODE_DIR/agents/"
+                log_success "Copied agent: $agent_name"
+                ((agent_count++))
+            fi
+        done
+        if [ $agent_count -eq 0 ]; then
+            log_error "No agents found in plugin"
+            exit 1
+        fi
     else
         log_error "agents directory not found in plugin"
         exit 1
@@ -225,20 +286,20 @@ merge_mcp_config() {
     OPENCODE_JSON="$OPENCODE_DIR/opencode.json"
     OPENCODE_JSONC="$OPENCODE_DIR/opencode.jsonc"
     
+    # Check if this is a new installation (no existing config)
+    IS_NEW_CONFIG=false
+    if [ ! -f "$OPENCODE_JSONC" ] && [ ! -f "$OPENCODE_JSON" ]; then
+        IS_NEW_CONFIG=true
+    fi
+    
     # Determine which config file to use (prefer JSONC over JSON)
     if [ -f "$OPENCODE_JSONC" ]; then
         CONFIG_FILE="$OPENCODE_JSONC"
     elif [ -f "$OPENCODE_JSON" ]; then
         CONFIG_FILE="$OPENCODE_JSON"
     else
-        log_warning "No opencode.json(c) found, creating new configuration"
-        # Default to JSONC for new configurations (supports comments)
+        # New configuration - default to JSONC (supports comments)
         CONFIG_FILE="$OPENCODE_JSONC"
-        cat > "$CONFIG_FILE" << 'EOF'
-{
-  "mcpServers": {}
-}
-EOF
     fi
     
     # Check if node is available for JSON manipulation
@@ -255,11 +316,12 @@ EOF
     node << EOF
 const fs = require('fs');
 const configFile = '$CONFIG_FILE';
+const templatePath = '$PLUGIN_DIR/opencode-mcp-config.jsonc';
+const isNewConfig = $([[ "$IS_NEW_CONFIG" == "true" ]] && echo true || echo false);
 
 try {
     // Read existing config
     let config = {};
-    const isNewConfig = !fs.existsSync(configFile);
     
     if (!isNewConfig) {
         const content = fs.readFileSync(configFile, 'utf8');
@@ -269,23 +331,20 @@ try {
     
     // Add schema only if creating new config
     if (isNewConfig) {
-        config['$schema'] = 'https://opencode.ai/config.json';
+        config['\$schema'] = 'https://opencode.ai/config.json';
     }
     
-    // Initialize mcp object if needed
-    if (!config.mcp) {
-        config.mcp = {};
-    }
+    // Read MCP config template from plugin repo
+    const templateContent = fs.readFileSync(templatePath, 'utf8');
+    const templateConfig = JSON.parse(templateContent.replace(/\/\/.*$/gm, ''));
     
-    // Configure remote MCP server for cloud-based ART-MCP
-    config.mcp['art-mcp'] = {
-        type: 'remote',
-        url: 'https://art-mcp-1005318772721.us-west1.run.app/mcp',
-        headers: {
-            'Authorization': 'Bearer {env:ARTMCP_AUTH_API_KEY}'
-        },
-        enabled: true
-    };
+    // Merge MCP configs: template defaults first, then user's existing config (preserves user's settings)
+    if (templateConfig.mcp) {
+        config.mcp = {
+            ...templateConfig.mcp,           // Load template defaults first
+            ...(config.mcp || {})            // Apply existing config second (preserves existing keys)
+        };
+    }
     
     // Write updated config
     fs.writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');
@@ -304,29 +363,29 @@ EOF
     fi
 }
 
-# ============================================================================
-# Step 4: Test MCP Connectivity
-# ============================================================================
+# # ============================================================================
+# # Step 4: Test MCP Connectivity
+# # ============================================================================
 
-test_mcp_connectivity() {
-    log_info "Step 4/5: Testing MCP server connectivity..."
+# test_mcp_connectivity() {
+#     log_info "Step 4/5: Testing MCP server connectivity..."
     
-    if ! command -v curl &> /dev/null; then
-        log_warning "curl not found, skipping connectivity test"
-        return 0
-    fi
+#     if ! command -v curl &> /dev/null; then
+#         log_warning "curl not found, skipping connectivity test"
+#         return 0
+#     fi
     
-    # Test with short timeout
-    if timeout 5 curl -s -f "$ART_MCP_URL" > /dev/null 2>&1; then
-        log_success "MCP server is reachable"
-        return 0
-    else
-        log_warning "Could not reach MCP server at $ART_MCP_URL"
-        log_info "This may be due to network issues or the server being temporarily unavailable"
-        log_info "You can test manually later with: curl $ART_MCP_URL"
-        return 0
-    fi
-}
+#     # Test with short timeout
+#     if timeout 5 curl -s -f "$ART_MCP_URL" > /dev/null 2>&1; then
+#         log_success "MCP server is reachable"
+#         return 0
+#     else
+#         log_warning "Could not reach MCP server at $ART_MCP_URL"
+#         log_info "This may be due to network issues or the server being temporarily unavailable"
+#         log_info "You can test manually later with: curl $ART_MCP_URL"
+#         return 0
+#     fi
+# }
 
 # ============================================================================
 # Step 5: Display Success Message
@@ -402,8 +461,8 @@ main() {
     # Step 4: Merge MCP config
     merge_mcp_config
     
-    # Step 5: Test connectivity
-    test_mcp_connectivity
+    # # Step 5: Test connectivity
+    # test_mcp_connectivity
     
     # Step 6: Show success message
     show_success_message
