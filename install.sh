@@ -56,8 +56,7 @@ REPO_URL="https://github.com/satyarth934/art-bundle-plugin.git"
 ART_MCP_URL="https://art-mcp-1005318772721.us-west1.run.app/mcp"
 
 # Detect if running from local `install.sh` or being piped via curl
-# if [ -f "install.sh" ] && [ -d ".opencode" ]; then
-if [ -f "install.sh" ]; then
+if [ -f "install.sh" ] && [ -d ".opencode" ]; then
     # Running from extracted/cloned repository
     PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     REPO_CLONED=true
@@ -122,15 +121,18 @@ ensure_repository_available() {
     
     # Checkout specific commit SHA for security
     if [ "$COMMIT_SHA" != "main" ]; then
-        cd "$PLUGIN_DIR"
-        git fetch --depth 1 origin "$COMMIT_SHA" 2>/dev/null || {
-            log_error "Failed to fetch commit $COMMIT_SHA"
-            exit 1
-        }
-        git checkout "$COMMIT_SHA" 2>/dev/null || {
-            log_error "Failed to checkout commit $COMMIT_SHA"
-            exit 1
-        }
+        # Use subshell to isolate cd - automatically returns to original directory
+        (
+            cd "$PLUGIN_DIR"
+            git fetch --depth 1 origin "$COMMIT_SHA" 2>/dev/null || {
+                log_error "Failed to fetch commit $COMMIT_SHA"
+                exit 1
+            }
+            git checkout "$COMMIT_SHA" 2>/dev/null || {
+                log_error "Failed to checkout commit $COMMIT_SHA"
+                exit 1
+            }
+        ) || exit 1
     fi
     
     log_success "Plugin files ready"
@@ -178,12 +180,16 @@ check_already_installed() {
         echo "(this only deletes the skills and agents corresponding to this plugin,"
         echo "preserving your other .opencode configurations):"
         echo ""
-        for skill_path in "${skill_paths[@]}"; do
-            echo "  rm -rf $skill_path"
-        done
-        for agent_path in "${agent_paths[@]}"; do
-            echo "  rm -rf $agent_path"
-        done
+        if [ -d ".opencode/skills" ]; then
+            for skill_dir in ".opencode/skills"/*; do
+                echo "  rm -rf $skill_dir"
+            done
+        fi
+        if [ -d ".opencode/agents" ]; then
+            for agent_file in ".opencode/agents"/*.md; do
+                echo "  rm -rf $agent_file"
+            done
+        fi
         echo ""
         exit 0
     fi
@@ -202,7 +208,7 @@ ensure_opencode_dir() {
 }
 
 # ============================================================================
-# Step 1: Detect OpenCode Configuration Location
+# Detect OpenCode Configuration Location
 # ============================================================================
 
 detect_opencode_config() {
@@ -225,7 +231,7 @@ detect_opencode_config() {
 }
 
 # ============================================================================
-# Step 2: Copy Skills and Agents
+# Copy Skills and Agents
 # ============================================================================
 
 copy_files() {
@@ -277,7 +283,7 @@ copy_files() {
 }
 
 # ============================================================================
-# Step 3: Merge MCP Configuration
+# Merge MCP Configuration
 # ============================================================================
 
 merge_mcp_config() {
@@ -335,8 +341,19 @@ try {
     }
     
     // Read MCP config template from plugin repo
-    const templateContent = fs.readFileSync(templatePath, 'utf8');
-    const templateConfig = JSON.parse(templateContent.replace(/\/\/.*$/gm, ''));
+    let templateContent;
+    try {
+        templateContent = fs.readFileSync(templatePath, 'utf8');
+    } catch (error) {
+        throw new Error(\`MCP template not found at \${templatePath}. This file should be included in the art-bundle-plugin repository.\`);
+    }
+    
+    let templateConfig;
+    try {
+        templateConfig = JSON.parse(templateContent.replace(/\/\/.*$/gm, ''));
+    } catch (error) {
+        throw new Error(\`MCP template at \${templatePath} contains invalid JSON: \${error.message}\`);
+    }
     
     // Merge MCP configs: template defaults first, then user's existing config (preserves user's settings)
     if (templateConfig.mcp) {
@@ -363,32 +380,8 @@ EOF
     fi
 }
 
-# # ============================================================================
-# # Step 4: Test MCP Connectivity
-# # ============================================================================
-
-# test_mcp_connectivity() {
-#     log_info "Step 4/5: Testing MCP server connectivity..."
-    
-#     if ! command -v curl &> /dev/null; then
-#         log_warning "curl not found, skipping connectivity test"
-#         return 0
-#     fi
-    
-#     # Test with short timeout
-#     if timeout 5 curl -s -f "$ART_MCP_URL" > /dev/null 2>&1; then
-#         log_success "MCP server is reachable"
-#         return 0
-#     else
-#         log_warning "Could not reach MCP server at $ART_MCP_URL"
-#         log_info "This may be due to network issues or the server being temporarily unavailable"
-#         log_info "You can test manually later with: curl $ART_MCP_URL"
-#         return 0
-#     fi
-# }
-
 # ============================================================================
-# Step 5: Display Success Message
+# Display Success Message
 # ============================================================================
 
 show_success_message() {
@@ -461,10 +454,7 @@ main() {
     # Step 4: Merge MCP config
     merge_mcp_config
     
-    # # Step 5: Test connectivity
-    # test_mcp_connectivity
-    
-    # Step 6: Show success message
+    # Step 5: Show success message
     show_success_message
 }
 
