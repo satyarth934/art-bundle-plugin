@@ -213,7 +213,7 @@ ensure_opencode_dir() {
 # ============================================================================
 
 detect_opencode_config() {
-    log_info "Step 1/5: Confirming local .opencode directory..."
+    log_info "Step 1/6: Confirming local .opencode directory..."
     
     # IMPORTANT: Only use LOCAL .opencode directory
     # We NEVER install globally to ~/.opencode (user home)
@@ -236,7 +236,7 @@ detect_opencode_config() {
 # ============================================================================
 
 detect_and_export_mcp_environment() {
-    log_info "Step 4/5: Detecting MCP environment..."
+    log_info "Step 4/6: Detecting MCP environment..."
     
     # Check if MCP configuration uses remote type
     OPENCODE_JSON="$OPENCODE_DIR/opencode.json"
@@ -283,11 +283,11 @@ detect_and_export_mcp_environment() {
 }
 
 # ============================================================================
-# Copy Skills and Agents
+# Copy Skills, Agents, and Plugins
 # ============================================================================
 
 copy_files() {
-    log_info "Step 2/5: Copying skills and agents..."
+    log_info "Step 2/6: Copying skills, agents, and plugins..."
     
     # Create target directories if they don't exist
     mkdir -p "$OPENCODE_DIR/skills"
@@ -332,6 +332,25 @@ copy_files() {
         log_error "agents directory not found in plugin"
         exit 1
     fi
+    
+    # Copy plugins (ART MCP deployment mode detector, etc.)
+    if [ -d "$PLUGIN_DIR/.opencode/plugins" ]; then
+        mkdir -p "$OPENCODE_DIR/plugins"
+        plugin_count=0
+        for plugin_file in "$PLUGIN_DIR/.opencode/plugins"/*.ts; do
+            if [ -f "$plugin_file" ]; then
+                plugin_name=$(basename "$plugin_file")
+                cp "$plugin_file" "$OPENCODE_DIR/plugins/"
+                log_success "Copied plugin: $plugin_name"
+                ((plugin_count++))
+            fi
+        done
+        if [ $plugin_count -eq 0 ]; then
+            log_warning "No plugins found in plugin directory (this is optional)"
+        fi
+    else
+        log_warning "plugins directory not found in plugin (optional feature)"
+    fi
 }
 
 # ============================================================================
@@ -339,7 +358,7 @@ copy_files() {
 # ============================================================================
 
 merge_mcp_config() {
-    log_info "Step 3/5: Merging MCP configuration..."
+    log_info "Step 3/6: Merging MCP configuration..."
     
     OPENCODE_JSON="$OPENCODE_DIR/opencode.json"
     OPENCODE_JSONC="$OPENCODE_DIR/opencode.jsonc"
@@ -549,7 +568,7 @@ main() {
     # Step 2: Detect OpenCode config location
     detect_opencode_config
     
-    # Step 3: Copy files
+    # Step 3: Copy files (skills, agents, plugins)
     copy_files
     
     # Step 4: Merge MCP config
