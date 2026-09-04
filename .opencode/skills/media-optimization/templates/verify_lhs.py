@@ -18,9 +18,9 @@ from doe import lhs_maximin
 # Configuration — edit these paths for each project
 # ---------------------------------------------------------------------------
 
-STOCKS_FILE  = '/app/projects/<PROJECT_SLUG>/stock_concentrations.csv'
-BOUNDS_FILE  = '/app/projects/<PROJECT_SLUG>/feasible_bounds.csv'
-CONFIG_FILE  = '/app/projects/<PROJECT_SLUG>/experiment_config.csv'
+STOCKS_FILE  = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/stock_concentrations.csv'
+BOUNDS_FILE  = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/feasible_bounds.csv'
+CONFIG_FILE  = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/experiment_config.csv'
 N_SAMPLES    = 1000
 SEED         = 42
 

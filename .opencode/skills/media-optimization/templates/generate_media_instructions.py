@@ -21,10 +21,10 @@ import core
 # Configuration — edit these paths for each project
 # ---------------------------------------------------------------------------
 
-TARGETS_FILE = '/app/projects/<PROJECT_SLUG>/target_concentrations.csv'
-STOCKS_FILE  = '/app/projects/<PROJECT_SLUG>/stock_concentrations.csv'
-CONFIG_FILE  = '/app/projects/<PROJECT_SLUG>/experiment_config.csv'
-OUTPUT_DIR   = '/app/projects/<PROJECT_SLUG>/lh_outputs/'
+TARGETS_FILE = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/target_concentrations.csv'
+STOCKS_FILE  = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/stock_concentrations.csv'
+CONFIG_FILE  = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/experiment_config.csv'
+OUTPUT_DIR   = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/lh_outputs/'
 FORMAT       = 'quarter'   # 'quarter' (8-to-4 multichannel) or 'traditional' (1 well per stock)
 
 # ---------------------------------------------------------------------------

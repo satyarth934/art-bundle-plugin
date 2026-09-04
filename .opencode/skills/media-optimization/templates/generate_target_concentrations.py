@@ -21,7 +21,7 @@ import pandas as pd
 # Configuration — edit these for each project
 # ---------------------------------------------------------------------------
 
-PROJECT_DIR           = Path('/app/projects/<PROJECT_SLUG>')
+PROJECT_DIR           = Path('/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>')
 RECOMMENDATIONS_PATH  = PROJECT_DIR / 'recommendations_current_cycle.csv'
 STANDARD_RECIPE_PATH  = PROJECT_DIR / 'standard_recipe.csv'
 OUTPUT_PATH           = PROJECT_DIR / 'target_concentrations.csv'
