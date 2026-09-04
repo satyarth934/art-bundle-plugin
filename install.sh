@@ -232,6 +232,57 @@ detect_opencode_config() {
 }
 
 # ============================================================================
+# Detect Remote MCP and Set Environment Variable
+# ============================================================================
+
+detect_and_export_mcp_environment() {
+    log_info "Step 4/5: Detecting MCP environment..."
+    
+    # Check if MCP configuration uses remote type
+    OPENCODE_JSON="$OPENCODE_DIR/opencode.json"
+    OPENCODE_JSONC="$OPENCODE_DIR/opencode.jsonc"
+    
+    # Determine which config file exists
+    CONFIG_FILE=""
+    if [ -f "$OPENCODE_JSONC" ]; then
+        CONFIG_FILE="$OPENCODE_JSONC"
+    elif [ -f "$OPENCODE_JSON" ]; then
+        CONFIG_FILE="$OPENCODE_JSON"
+    fi
+    
+    if [ -z "$CONFIG_FILE" ]; then
+        log_warning "No OpenCode configuration found yet (will be created)"
+        return 0
+    fi
+    
+    # Check if remote MCP is configured
+    if grep -q '"type".*:.*"remote"' "$CONFIG_FILE" 2>/dev/null; then
+        # Remote MCP detected — export for this install session only.
+        # At runtime, the plugin (plugins/index.ts) automatically detects
+        # the deployment mode from config files — no shell profile setup needed.
+        export ARTMCP_DEPLOYMENT_MODE="gcp_remote"
+        log_success "Remote MCP detected - enabling container path guards"
+        echo "   (ARTMCP_DEPLOYMENT_MODE=gcp_remote)"
+
+        # Copy hook configuration files
+        if [ -d "$PLUGIN_DIR/.opencode/config" ]; then
+            mkdir -p "$OPENCODE_DIR/config"
+            cp "$PLUGIN_DIR/.opencode/config"/*.yaml "$OPENCODE_DIR/config/" 2>/dev/null || true
+            log_success "Container path configuration copied"
+        fi
+        
+        # Copy hook files
+        if [ -d "$PLUGIN_DIR/.opencode/hooks" ]; then
+            mkdir -p "$OPENCODE_DIR/hooks"
+            cp "$PLUGIN_DIR/.opencode/hooks"/*.ts "$OPENCODE_DIR/hooks/" 2>/dev/null || true
+            log_success "Container path guard hooks installed"
+        fi
+    else
+        log_success "Local MCP detected - container path guards disabled"
+    fi
+}
+
+# ============================================================================
 # Copy Skills and Agents
 # ============================================================================
 
@@ -326,14 +377,22 @@ const configFile = '$CONFIG_FILE';
 const templatePath = '$PLUGIN_DIR/opencode-mcp-config.jsonc';
 const isNewConfig = $([[ "$IS_NEW_CONFIG" == "true" ]] && echo true || echo false);
 
+// Strip JSONC comments and trailing commas, protecting string values (e.g. URLs)
+function stripJsoncComments(jsonc) {
+    const noComments = jsonc.replace(
+        /\\\\"|"(?:\\\\"|[^"])*"|(\/\/.*|\/\*[\\s\\S]*?\\*\/)/g,
+        (match, group1) => group1 ? "" : match
+    );
+    return noComments.replace(/,\\s*([\\]}])/g, "\$1");
+}
+
 try {
     // Read existing config
     let config = {};
     
     if (!isNewConfig) {
         const content = fs.readFileSync(configFile, 'utf8');
-        // Simple JSON parse (ignores comments in JSONC)
-        config = JSON.parse(content.replace(/\/\/.*$/gm, ''));
+        config = JSON.parse(stripJsoncComments(content));
     }
     
     // Add schema only if creating new config
@@ -351,14 +410,7 @@ try {
     
     let templateConfig;
     try {
-        // 1. Convert non-breaking spaces (\u00A0) to standard spaces
-        // 2. Strip single-line comments, but ignore "://" in URLs
-        // 3. Strip multi-line comments
-        const cleanedContent = templateContent
-            .replace(/\u00A0/g, " ")
-            .replace(/(?<!:)\/\/.*$/gm, "")
-            .replace(/\/\*[\s\S]*?\*\//g, "");
-        templateConfig = JSON.parse(cleanedContent);
+        templateConfig = JSON.parse(stripJsoncComments(templateContent));
         
     } catch (error) {
         throw new Error(\`MCP template at \${templatePath} contains invalid JSON: \${error.message}\`);
@@ -394,7 +446,7 @@ EOF
 # ============================================================================
 
 show_success_message() {
-    log_info "Step 5/5: Installation complete!"
+    log_info "Step 6/6: Installation complete!"
     
     echo ""
     echo "=========================================================================="
@@ -405,10 +457,25 @@ show_success_message() {
     echo "  • Media-optimization skill (with templates)"
     echo "  • 5 specialized agents (art-specialist, liquid-handler-specialist, etc.)"
     echo "  • MCP integration configuration"
+    
+    # Show container path guard info if remote MCP
+    if [ "$ARTMCP_DEPLOYMENT_MODE" = "gcp_remote" ]; then
+        echo "  • Container path guard hooks (for remote GCP MCP)"
+        echo "    - Automatically intercepts /app/ and /shared/ paths"
+        echo "    - Redirects to MCP tools with helpful guidance"
+    fi
+    
     echo ""
     echo "MCP Server Configuration:"
     echo "  URL: $ART_MCP_URL"
     echo "  Config File: $CONFIG_FILE"
+    
+    if [ "$ARTMCP_DEPLOYMENT_MODE" = "gcp_remote" ]; then
+        echo "  Environment: Remote (GCP)"
+    else
+        echo "  Environment: Local"
+    fi
+    
     echo ""
     echo "Next Steps:"
     echo ""
@@ -420,15 +487,40 @@ show_success_message() {
     echo "   This key is required to communicate with the ART-MCP Cloud Run service."
     echo "   Contact your system administrator if you don't have it."
     echo ""
-    echo "2. Start Using the Plugin:"
+    
+    if [ "$ARTMCP_DEPLOYMENT_MODE" = "gcp_remote" ]; then
+        echo "2. ✅ Container Path Guards are Automatically Enabled"
+        echo "   The plugin detects remote MCP from your config at startup — no manual"
+        echo "   environment variable setup needed. The following paths will be intercepted:"
+        echo "     • /app/* - GCP container application code"
+        echo "     • /shared/* - GCP bucket mount paths"
+        echo ""
+        echo "   When you try to access these paths locally, OpenCode will:"
+        echo "     • Block the local tool call"
+        echo "     • Suggest the appropriate MCP tool (execute_code, etc.)"
+        echo "     • Log the interception for debugging"
+        echo ""
+        echo "   To customize container paths, edit:"
+        echo "     .opencode/config/remote-container-paths.yaml"
+        echo ""
+        echo "3. Start Using the Plugin:"
+    else
+        echo "2. Start Using the Plugin:"
+    fi
+    
     echo "   Run OpenCode and select the media-optimization skill"
     echo "   You'll be prompted to provide:"
     echo "     • Your email (user@lab.edu)"
     echo "     • Project slug (experiment_name_v1)"
     echo ""
-    echo "3. Documentation:"
+    echo "4. Documentation:"
     echo "   See PLUGIN_SETUP.md for post-installation guide"
     echo "   See README.md for quick start examples"
+    
+    if [ "$ARTMCP_DEPLOYMENT_MODE" = "gcp_remote" ]; then
+        echo "   See docs/CONTAINER_PATH_INTERCEPTION.md for guard configuration"
+    fi
+    
     echo ""
     echo "=========================================================================="
     echo ""
@@ -463,7 +555,10 @@ main() {
     # Step 4: Merge MCP config
     merge_mcp_config
     
-    # Step 5: Show success message
+    # Step 5: Detect remote MCP and set environment
+    detect_and_export_mcp_environment
+    
+    # Step 6: Show success message
     show_success_message
 }
 
