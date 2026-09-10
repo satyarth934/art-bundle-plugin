@@ -4,6 +4,7 @@
  */
 
 import type { MCPConfig } from "./types";
+import { fileLog } from "./file-logger";
 
 let mcpToolsCache: string[] | null = null;
 
@@ -28,6 +29,7 @@ export async function detectMCPTools(mcpConfig: MCPConfig): Promise<string[]> {
     const response = await fetch(mcpConfig.url, {
       method: "POST",
       headers: {
+        Accept: "application/json, text/event-stream",
         "Content-Type": "application/json",
         ...(mcpConfig.headers || {}),
       },
@@ -40,8 +42,9 @@ export async function detectMCPTools(mcpConfig: MCPConfig): Promise<string[]> {
     });
 
     if (!response.ok) {
-      console.debug(
-        `[container-path-guard] MCP tool detection returned ${response.status}`
+      const body = await response.text();
+      fileLog(
+        `[container-path-guard] MCP tool detection returned ${response.status}: ${body}`
       );
       return [];
     }
@@ -57,16 +60,15 @@ export async function detectMCPTools(mcpConfig: MCPConfig): Promise<string[]> {
 
     // Handle error response
     if (data.error) {
-      console.debug(
-        `[container-path-guard] MCP tool detection error:`,
-        data.error
+      fileLog(
+        `[container-path-guard] MCP tool detection error: ${JSON.stringify(data.error)}`
       );
       return [];
     }
 
     return [];
   } catch (error) {
-    console.debug(`[container-path-guard] Failed to detect MCP tools:`, error);
+    fileLog(`[container-path-guard] Failed to detect MCP tools: ${error}`);
     return [];
   }
 }
