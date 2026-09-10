@@ -1,0 +1,29 @@
+// ART Bundle Plugin - MCP Configuration Template
+// 
+// This file shows how the MCP server is configured in your opencode.jsonc
+// The install.sh script will automatically merge this configuration into your local .opencode/opencode.jsonc
+//
+// Source of truth for cloud MCP endpoint:
+// https://art-mcp-1005318772721.us-west1.run.app/mcp
+
+{
+  "mcp": {
+    "art-mcp": {
+      // Type: Cloud-based remote MCP server
+      "type": "remote",
+      
+      // URL: GCP Cloud Run hosted ART-MCP service
+      "url": "https://art-mcp-1005318772721.us-west1.run.app/mcp",
+      
+      // Authentication: API key from environment variable
+      // Users must set: export ARTMCP_AUTH_API_KEY="your-api-key"
+      // This is REQUIRED - the MCP server will reject requests without it
+      "headers": {
+        "Authorization": "Bearer {env:ARTMCP_AUTH_API_KEY}"
+      },
+      
+      // Enable this MCP server
+      "enabled": true
+    }
+  }
+}
