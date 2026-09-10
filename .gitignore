@@ -79,3 +79,10 @@ build/
 .opencode/logs/
 *.pot
 .cache
+
+
+# Custom gitignore rules for art-bundle-plugin
+docs/superpowers
+docs/CONTAINER_PATH_INTERCEPTION.MD
+docs/PROJECT_AUDIT_2026-09-09.md
+HANDOFF.md
