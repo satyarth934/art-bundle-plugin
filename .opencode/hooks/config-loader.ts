@@ -6,6 +6,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "yaml";
+import { fileLog } from "./file-logger";
 import type { RemoteContainerConfig } from "./types";
 
 const DEFAULT_CONFIG_PATH = ".opencode/config/remote-container-paths.yaml";
@@ -35,9 +36,8 @@ export async function loadContainerConfig(
       enabled: config.container_paths.length > 0,
     };
   } catch (error) {
-    console.debug(
-      `[container-path-guard] Failed to load config from ${resolvedPath}:`,
-      error
+    fileLog(
+      `[container-path-guard] Failed to load config from ${resolvedPath}: ${error}`
     );
     return { container_paths: [], enabled: false };
   }

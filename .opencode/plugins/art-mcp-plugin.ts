@@ -3,94 +3,37 @@
  * Main entry point that registers the container path interception hooks
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
-import type { Plugin } from "@opencode-ai/plugin";
+import type { Config, Plugin, PluginInput } from "@opencode-ai/plugin";
 import { containerPathGuard } from "../hooks/container-path-guard";
-
-/**
- * Detect whether the art-mcp server is configured as remote or local.
- *
- * Checks config files in this order (first match wins):
- *   1. <project-root>/opencode.jsonc
- *   2. <project-root>/opencode.json
- *   3. <project-root>/.opencode/opencode.jsonc
- *   4. <project-root>/.opencode/opencode.json
- *   5. ~/.config/opencode/opencode.json  (global fallback)
- *
- * If art-mcp.type === "remote" is found in any of these, sets
- * process.env.ARTMCP_DEPLOYMENT_MODE = "gcp_remote" for this session.
- * No shell profile modification required.
- */
-/**
- * Strip JSONC comments and trailing commas to produce valid JSON.
- * Protects string values (including URLs) from being incorrectly stripped.
- */
-function stripJsoncComments(jsonc: string): string {
-  // Match quoted strings (leave untouched) OR comments (strip them)
-  const noComments = jsonc.replace(
-    /\\"|"(?:\\"|[^"])*"|(\/\/.*|\/\*[\s\S]*?\*\/)/g,
-    (match, group1) => (group1 ? "" : match)
-  );
-  // Strip trailing commas (valid JSONC, invalid JSON)
-  return noComments.replace(/,\s*([\]}])/g, "$1");
-}
-
-function detectDeploymentMode(): void {
-  const projectRoot = process.cwd();
-
-  const candidates = [
-    path.join(projectRoot, "opencode.jsonc"),
-    path.join(projectRoot, "opencode.json"),
-    path.join(projectRoot, ".opencode", "opencode.jsonc"),
-    path.join(projectRoot, ".opencode", "opencode.json"),
-    path.join(os.homedir(), ".config", "opencode", "opencode.json"),
-  ];
-
-  for (const configPath of candidates) {
-    if (!fs.existsSync(configPath)) continue;
-
-    try {
-      const content = fs.readFileSync(configPath, "utf-8");
-      const cleaned = stripJsoncComments(content);
-      const config = JSON.parse(cleaned);
-
-      if (config?.mcp?.["art-mcp"]?.type === "remote") {
-        process.env.ARTMCP_DEPLOYMENT_MODE = "gcp_remote";
-        console.debug(
-          `[art-bundle-plugin] Remote MCP detected from ${configPath} — container path guards enabled`
-        );
-        return;
-      }
-    } catch (err) {
-      // Malformed config — skip and try next candidate
-      console.debug(
-        `[art-bundle-plugin] Could not parse ${configPath}, skipping: ${err}`
-      );
-      continue;
-    }
-  }
-
-  // Not found in any config — guards stay disabled
-  console.debug(
-    "[art-bundle-plugin] No remote art-mcp config found — container path guards disabled"
-  );
-}
+import { initSessionLog, fileLog } from "../hooks/file-logger";
+import type { MCPConfig } from "../hooks/types";
 
 /**
  * ARTBundlePlugin
  * Detects deployment mode at startup, then registers container path guard hooks.
  */
-export const ARTBundlePlugin: Plugin = async (ctx) => {
-  // Detect deployment mode from config files — sets ARTMCP_DEPLOYMENT_MODE if remote
-  detectDeploymentMode();
+export const ARTBundlePlugin: Plugin = async (ctx: PluginInput) => {
+  // Initialize session-based logging for the plugin and its hooks
+  initSessionLog();
 
-  // Initialize container path guard (reads ARTMCP_DEPLOYMENT_MODE)
-  const guards = await containerPathGuard(ctx);
+  let mcpConfig: MCPConfig | null = null;
+  const guards = await containerPathGuard(ctx, () => mcpConfig);
 
   return {
     ...guards,
+    config: async (config: Config) => {
+      const configuredMCP = config.mcp?.["art-mcp"];
+      if (configuredMCP?.type === "remote" && "url" in configuredMCP) {
+        mcpConfig = configuredMCP;
+        process.env.ARTMCP_DEPLOYMENT_MODE = "gcp_remote";
+        fileLog(
+          "[art-bundle-plugin] Remote MCP resolved from OpenCode config - container path guards enabled"
+        );
+      } else {
+        mcpConfig = null;
+        delete process.env.ARTMCP_DEPLOYMENT_MODE;
+      }
+    },
   };
 };
 

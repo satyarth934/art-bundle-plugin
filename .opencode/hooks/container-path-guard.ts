@@ -5,6 +5,7 @@
  */
 
 import type { MCPConfig } from "./types";
+import type { PluginInput } from "@opencode-ai/plugin";
 import {
   loadContainerConfig,
   matchContainerPattern,
@@ -12,39 +13,30 @@ import {
 } from "./config-loader";
 import { detectMCPTools, isMCPTool } from "./mcp-detector";
 import { logIntercept, generateErrorMessage } from "./logger";
+import { fileLog } from "./file-logger";
 
-export async function containerPathGuard(ctx: any) {
-  // Check if enabled via environment variable
-  const isRemote = process.env.ARTMCP_DEPLOYMENT_MODE === "gcp_remote";
-
-  if (!isRemote) {
-    // Hook disabled, return empty hooks object
-    return {};
-  }
-
-  // Get MCP configuration from OpenCode context
-  const mcpConfig = extractMCPConfig(ctx);
-
-  if (!mcpConfig) {
-    console.debug(
-      "[container-path-guard] Could not extract MCP configuration, disabling hook"
-    );
-    return {};
-  }
-
-  // Detect available MCP tools
-  const mcpTools = await detectMCPTools(mcpConfig);
-
-  if (mcpTools.length === 0) {
-    console.debug(
-      "[container-path-guard] Warning: Could not detect MCP tools from remote server"
-    );
-  }
+export async function containerPathGuard(
+  ctx: PluginInput,
+  getMCPConfig: () => MCPConfig | null
+) {
+  let mcpTools: string[] | null = null;
 
   // Return hook implementation
   return {
     "tool.execute.before": async (input: any, output: any) => {
       try {
+        const mcpConfig = getMCPConfig();
+        if (!mcpConfig) return;
+
+        if (mcpTools === null) {
+          mcpTools = await detectMCPTools(mcpConfig);
+          if (mcpTools.length === 0) {
+            fileLog(
+              "[container-path-guard] Warning: Could not detect MCP tools from remote server"
+            );
+          }
+        }
+
         // Skip if this is an MCP tool call
         if (mcpTools.includes(input.tool)) {
           return;
@@ -92,35 +84,15 @@ export async function containerPathGuard(ctx: any) {
           ctx.client
         );
 
+        const errorMsg = generateErrorMessage(input.tool, matchedPattern, suggestion);
+        fileLog(errorMsg, { sessionID: input.sessionID, callID: input.callID });
+
         // Throw error to block tool and provide guidance
-        throw new Error(generateErrorMessage(input.tool, matchedPattern, suggestion));
+        throw new Error(errorMsg);
       } catch (error) {
         // Re-throw to block the tool call
         throw error;
       }
     },
   };
-}
-
-/**
- * Extract MCP configuration from OpenCode context
- * Reads from the project's opencode.jsonc/.json config
- */
-function extractMCPConfig(ctx: any): MCPConfig | null {
-  try {
-    // In OpenCode plugins, context contains project information
-    // We need to read the MCP config from opencode.jsonc
-
-    // Try to get from context (if available)
-    if (ctx.project && ctx.project.mcpConfig) {
-      return ctx.project.mcpConfig;
-    }
-
-    // Otherwise, we'll construct from known locations
-    // This is a fallback - ideally ctx provides this
-    return null;
-  } catch (error) {
-    console.debug("[container-path-guard] Error extracting MCP config:", error);
-    return null;
-  }
 }

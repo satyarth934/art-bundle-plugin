@@ -3,6 +3,7 @@
  */
 
 import type { InterceptEvent } from "./types";
+import { fileLog } from "./file-logger";
 
 export async function logIntercept(
   event: InterceptEvent,
@@ -24,7 +25,7 @@ export async function logIntercept(
     });
   } catch (error) {
     // Silently fail logging to avoid breaking the hook
-    console.debug("[container-path-guard] Logging failed:", error);
+    fileLog(`[container-path-guard] Logging failed: ${error}`);
   }
 }
 

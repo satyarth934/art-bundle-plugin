@@ -76,5 +76,6 @@ build/
 
 # Misc
 *.log
+.opencode/logs/
 *.pot
 .cache
