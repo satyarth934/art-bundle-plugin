@@ -188,6 +188,7 @@ Start here:
 
 Understanding the system:
 1. **[docs/USER_ISOLATION_PATTERN.md](docs/USER_ISOLATION_PATTERN.md)** — How user/project isolation works
+2. **HYBRID_MIGRATION.md** — Future v2 roadmap
 
 ### Reference Materials
 
@@ -287,6 +288,13 @@ opencode
 - Read PLUGIN_SETUP.md for detailed post-installation guide
 - Explore media-optimization skill documentation
 - Review template examples in `.opencode/skills/media-optimization/templates/`
+
+### Future Enhancements (v2)
+
+See **HYBRID_MIGRATION.md** for planned improvements:
+- Automated releases and updates
+- Enhanced distribution packaging
+- GitHub Actions integration
 
 ---
 

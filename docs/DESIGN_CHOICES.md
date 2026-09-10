@@ -314,13 +314,16 @@ Script prefers `.jsonc` over `.json` to support comments.
 | `README.md` | User-facing installation and usage guide |
 | `PLUGIN_SETUP.md` | Post-installation setup and troubleshooting |
 | `docs/USER_ISOLATION_PATTERN.md` | Technical reference for user/project isolation |
+| `HYBRID_MIGRATION.md` | Roadmap for v2 hybrid architecture |
 | `docs/DESIGN_CHOICES.md` | This file - design decisions and future work |
+| `TESTING_RESULTS.md` | Test results and validation checklist |
 
 ### Design Choice: Distributed Documentation
 
 Rather than centralizing all documentation, we distribute it:
 - **Installation**: README.md
 - **Setup details**: PLUGIN_SETUP.md  
+- **Architecture**: HYBRID_MIGRATION.md
 - **Isolation**: USER_ISOLATION_PATTERN.md
 - **Design**: DESIGN_CHOICES.md (this file)
 
@@ -390,6 +393,11 @@ ART Bundle Plugin is a separate GitHub repository from ART_MCP.
 
 ### Future Decision (v2): Hybrid Approach
 
+See `HYBRID_MIGRATION.md` for detailed plan to move to hybrid approach:
+- Source lives in `ART_MCP/art-bundle-plugin/`
+- Automated build script creates distribution repository
+- GitHub Actions handles packaging and release
+
 **Advantages**:
 - Single source of truth
 - Automated sync between source and distribution
@@ -413,7 +421,7 @@ When v2 hybrid approach is implemented:
 1. **Automated releases** (v2 roadmap)
    - GitHub Actions workflow to update COMMIT_SHA
    - Automated changelog generation
-   - Status: Internal roadmap
+   - Status: Documented in HYBRID_MIGRATION.md
 
 2. **Version tracking**
    - Store installed version in `.opencode/`
