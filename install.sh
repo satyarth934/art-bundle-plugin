@@ -53,8 +53,7 @@ NC='\033[0m' # No Color
 # SECURITY: Commit SHA is pinned for supply chain security
 # Update this when releasing new versions
 # See docs/DESIGN_CHOICES.md for rationale
-# COMMIT_SHA="main"  # TODO: Replace with actual commit SHA on release (e.g., "a1b2c3d4e5f6...")
-COMMIT_SHA="fdae7a381a1034af9936f51674addfa0e740f3fd"  # TODO: Replace with actual commit SHA on release (e.g., "a1b2c3d4e5f6...")
+COMMIT_SHA="9536d4e9bd4cc8bfa266689f0d36a5bfdfba456e"
 
 # Repository configuration
 REPO_URL="https://github.com/satyarth934/art-bundle-plugin.git"
