@@ -45,6 +45,17 @@ The script will:
 - Configure MCP server connection locally
 - Verify connectivity
 
+For local development, you can install directly from an uncommitted checkout
+without cloning the pinned GitHub revision:
+
+```bash
+ART_BUNDLE_PLUGIN_DIR="/path/to/art-bundle-plugin" ./install.sh
+```
+
+The environment variable changes only where the plugin files are read from;
+installation still targets the current project's local `.opencode/` directory.
+Normal users should omit it and use the GitHub-based installation flow.
+
 ### 3. Verify Installation
 
 In OpenCode, you should see:
@@ -177,7 +188,7 @@ Start here:
 
 Understanding the system:
 1. **[docs/USER_ISOLATION_PATTERN.md](docs/USER_ISOLATION_PATTERN.md)** — How user/project isolation works
-2. **[HYBRID_MIGRATION.md](HYBRID_MIGRATION.md)** — Future v2 roadmap
+2. **HYBRID_MIGRATION.md** — Future v2 roadmap
 
 ### Reference Materials
 
@@ -280,7 +291,7 @@ opencode
 
 ### Future Enhancements (v2)
 
-See [HYBRID_MIGRATION.md](HYBRID_MIGRATION.md) for planned improvements:
+See **HYBRID_MIGRATION.md** for planned improvements:
 - Automated releases and updates
 - Enhanced distribution packaging
 - GitHub Actions integration

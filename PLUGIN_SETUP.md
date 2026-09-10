@@ -412,7 +412,7 @@ See **README.md** for workflow examples.
 
 - [README.md](README.md) — Quick start guide
 - [docs/USER_ISOLATION_PATTERN.md](docs/USER_ISOLATION_PATTERN.md) — User/project context
-- [HYBRID_MIGRATION.md](HYBRID_MIGRATION.md) — Future roadmap
+- HYBRID_MIGRATION.md — Future roadmap
 
 ### Skill Documentation
 

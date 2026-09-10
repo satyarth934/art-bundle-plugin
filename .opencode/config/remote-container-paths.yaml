@@ -1,0 +1,40 @@
+# Remote Container Path Configuration
+# 
+# This file defines which paths are considered "remote container paths"
+# and how to route tool calls targeting these paths to appropriate MCP tools.
+#
+# The hook dynamically loads this config on each tool invocation,
+# so changes take effect immediately without restarting OpenCode.
+
+container_paths:
+  # GCP Container Application Code Paths
+  - pattern: "/app/*"
+    description: "GCP container application code and core libraries"
+    tools:
+      - read
+      - edit
+      - bash
+      - glob
+      - grep
+    mcp_routing:
+      read: "Use execute_code() to read application files from the container"
+      edit: "Use execute_code() to modify application code in the container"
+      bash: "Use execute_code() to run shell commands in the /app/ directory"
+      glob: "Use execute_code() with Python glob module to list application files"
+      grep: "Use execute_code() with Python regex to search within application files"
+
+  # GCP Bucket Mount Paths (User Project Data)
+  - pattern: "/shared/*"
+    description: "GCP bucket mount paths for user project data and shared resources"
+    tools:
+      - read
+      - edit
+      - bash
+      - glob
+      - grep
+    mcp_routing:
+      read: "Use execute_code() or upload_script() to read files from the shared bucket"
+      edit: "Use execute_code() to modify files in the shared bucket"
+      bash: "Use execute_code() to run shell commands on bucket resources"
+      glob: "Use execute_code() with Python to list bucket file contents"
+      grep: "Use execute_code() with Python regex to search bucket files"

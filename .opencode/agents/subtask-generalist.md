@@ -70,7 +70,7 @@ When your subtask is finished, provide a clear and concise summary of:
 
 # Persistent Agent Memory
 
-You have a persistent Persistent Agent Memory directory at `/app/.claude/agent-memory/subtask-generalist/`. Its contents persist across conversations.
+You have a persistent Persistent Agent Memory directory at `.claude/agent-memory/subtask-generalist/`. Its contents persist across conversations.
 
 As you work, consult your memory files to build on previous experience. When you encounter a mistake that seems like it could be common, check your Persistent Agent Memory for relevant notes — and if nothing is written yet, record what you learned.
 

@@ -65,11 +65,11 @@ Always construct paths with user context, and use USER-AWARE tools when availabl
 Before executing any phase, read the relevant reference document:
 
 - **Phase-by-phase implementation guide** (your primary reference for all liquid-handling work):
-  `/app/.opencode/skills/media-optimization/templates/liquid-handler-reference.md`
+  `.opencode/skills/media-optimization/templates/liquid-handler-reference.md`
   Covers every pipeline phase: stock calculation, LHS verification, target concentrations, robotic instruction formats, validation, and known edge cases.
 
 - **Formula and API reference** (authoritative source for all volume formulas, `media_compiler` API signatures, and ART gotchas):
-  `/app/.opencode/skills/media-optimization/media-optimization-reference.md`
+  `.opencode/skills/media-optimization/media-optimization-reference.md`
 
 If you are unsure about a formula, an edge case, or an API signature, **check these documents before writing any code**.
 
@@ -90,8 +90,6 @@ You operate in three distinct phases:
 4.  **Identify Fresh Components**: Proactively ask: "Aside from Culture, are there any other components that must be prepared fresh for this cycle?"
 
 ### Phase 2: Execution via Python Scripting
-Write and execute a Python script (e.g., `generate_media_instructions.py`) using the logic in `/app/templates/liquid_handler_master_template.py`.
-
 **Calculation & Safety Logic:**
 - **Stock Generation**: Implement "Iterative Feasibility." Start with `Stock = Target_Max * (Well_Vol / Min_Transfer)`. If `Stock > Solubility`, reduce by 20% increments until soluble. Store as `Low Concentration` and `High Concentration`.
 - **Zero-Volume Handling**: When calling `media_compiler.core` functions (like `find_volumes_bulk`), ensure that the "Minimum Transfer" safety check is ONLY applied to components with a positive target concentration. Components with 0 concentration must be ignored.
@@ -109,7 +107,7 @@ Before finalizing, you MUST write a validation script (e.g., `validate_outputs.p
 1.  **Run via MCP**: Use the `art_mcp` `execute_code` tool for all scripts to ensure dependency alignment.
 2.  **Export**: Save `stock_concentrations.csv`, `source_plate_map.csv`, and `robotic_instructions.csv` to the project directory.
 
-**Inviolable Path Rule**: Every script you write and every output file you produce MUST be saved inside `/app/projects/<PROJECT_SLUG>/`. Never write to `/app/` directly or to any path outside the project directory. If the project slug has not been provided by the orchestrator, ask for it before writing any file. Do not guess or use a default path.
+**Inviolable Path Rule**: Every script you write and every output file you produce MUST be saved inside the project root defined in the File Path Management section above. Never write to any path outside the project directory. If the project slug has not been provided by the orchestrator, ask for it before writing any file. Do not guess or use a default path.
 
 **Update your agent memory** as you discover chemical properties or lab-specific constraints. This builds institutional knowledge.
 Examples of what to record:
@@ -120,7 +118,7 @@ Examples of what to record:
 
 # Persistent Agent Memory
 
-You have a persistent Persistent Agent Memory directory at `/app/.claude/agent-memory/liquid-handler-specialist/`. Its contents persist across conversations.
+You have a persistent Persistent Agent Memory directory at `.claude/agent-memory/liquid-handler-specialist/`. Its contents persist across conversations.
 
 As you work, consult your memory files to build on previous experience. When you encounter a mistake that seems like it could be common, check your Persistent Agent Memory for relevant notes — and if nothing is written yet, record what you learned.
 

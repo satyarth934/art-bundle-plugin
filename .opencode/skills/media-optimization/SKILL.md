@@ -468,17 +468,17 @@ Ask: "All validations have passed. Do you approve the final outputs for use?"
 
 These rules are inviolable. Violating any of them will produce incorrect or dangerous lab instructions.
 
-### 1. Project Directory -- All Scripts and Outputs MUST Live Under `/app/projects/<PROJECT_SLUG>/`
+### 1. Project Directory -- All Scripts and Outputs MUST Live Under `/shared/user_impl_alpha/{user_email}/{project_slug}/`
 
 Every script written or executed for a project must use the project directory as its root. The correct path structure is:
 
 ```
-/app/projects/<PROJECT_SLUG>/               ← project root (all inputs, outputs, scripts)
-/app/projects/<PROJECT_SLUG>/lh_outputs/    ← robotic instruction outputs
-/app/projects/<PROJECT_SLUG>/final_files/   ← final deliverables
+/shared/user_impl_alpha/{user_email}/{project_slug}/               ← project root (all inputs, outputs, scripts)
+/shared/user_impl_alpha/{user_email}/{project_slug}/lh_outputs/    ← robotic instruction outputs
+/shared/user_impl_alpha/{user_email}/{project_slug}/final_files/   ← final deliverables
 ```
 
-**Never write scripts or outputs to `/app/` directly.** When adapting a template, replace `<PROJECT_SLUG>` with the actual project slug (e.g., `media_opt_20260305_run01`). If the project slug is not known, ask the orchestrator — do not guess or default to `/app/`.
+**Never write scripts or outputs outside the project root.** When adapting a template, replace `{user_email}` and `{project_slug}` with the actual user email and project slug (e.g., `alice@example.com` and `media_opt_20260305_run01`). If either is not known, ask the orchestrator — do not guess or use a default path.
 
 ### 2. Volume Calculations -- Use `media_compiler/core.py` FIRST
 

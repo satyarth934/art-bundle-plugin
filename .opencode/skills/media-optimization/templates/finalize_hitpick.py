@@ -15,10 +15,10 @@ import pandas as pd
 # Configuration — edit these paths for each project
 # ---------------------------------------------------------------------------
 
-INSTRUCTIONS_FILE = '/app/projects/<PROJECT_SLUG>/lh_outputs/lh_instructions_quarter.csv'
-LABWARE_MAP_FILE  = '/app/projects/<PROJECT_SLUG>/lh_outputs/plate_labware_mapping.csv'
-OUTPUT_FILE       = '/app/projects/<PROJECT_SLUG>/lh_outputs/hitpick_final.xlsx'
-LABWARE_REF_FILE  = None   # optional: '/app/projects/<PROJECT_SLUG>/compatible_labware.csv'
+INSTRUCTIONS_FILE = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/lh_outputs/lh_instructions_quarter.csv'
+LABWARE_MAP_FILE  = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/lh_outputs/plate_labware_mapping.csv'
+OUTPUT_FILE       = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/lh_outputs/hitpick_final.xlsx'
+LABWARE_REF_FILE  = None   # optional: '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/compatible_labware.csv'
 
 # Default labware list — extend for your robot deck
 DEFAULT_LABWARE = [

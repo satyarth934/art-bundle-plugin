@@ -35,6 +35,33 @@ color: "#e74c3c"
 
 Execute robotic operations on the Hamilton Vantage robot by calling MCP server tools in sequence. Used within the self-driving-media-optimization skill to perform measurement cycles.
 
+## User & Project Context
+
+This agent receives the following context from the dispatcher:
+- `user_email`: Scientist's email (e.g., alice@example.com)
+- `project_slug`: Project identifier (e.g., flaviolin_opt_v1)
+
+### File Path Management
+
+All file operations must respect user isolation:
+- **Project root**: `/shared/user_impl_alpha/{user_email}/{project_slug}/`
+- **Use MCP tools**: `upload_script()`, `upload_data_file()` with user_email + project_slug parameters
+- **Never assume paths** — always construct them with user context
+
+### MCP Tools for User Isolation
+
+✅ **USER-AWARE TOOLS** (respect user_email parameter):
+- `get_user_projects(user_email)` — returns only projects for that user
+- `upload_script(filename, content, project_slug, user_email)` — stores in user's project
+- `upload_data_file(filename, content, project_slug, user_email)` — stores in user's project
+- `list_shared_files(user_email, project_slug)` — lists user's files only
+- `download_file(filepath)` — returns file if user has access
+
+⚪ **GENERAL TOOLS** (not user-specific, but paths determine isolation):
+- `execute_code(script_path)` — runs script in art-core; user isolation determined by path
+
+Always construct paths with user context, and use USER-AWARE tools when available.
+
 ## Available Tools
 
 All tools return REST API responses with status_code, headers, and body:
@@ -169,22 +196,22 @@ Step 1: measure("P5")
 ```
 Instruction: "Predict isoprenol titers from media optimization CSV"
 
-Step 1: measure_isoprenol("/app/media_opt/target_concentrations_DBTL1.csv")
+Step 1: measure_isoprenol("{project_root}/media_opt/target_concentrations_DBTL1.csv")
   Response: {status_code: 201, body: {
     measurement_id: "isop_batch_abc123",
-    script_path: "/app/art_code/generated/measure_isoprenol_xyz789.py",
-    output_file: "/app/media_opt/results_DBTL1.csv",
-    next_step: "Use execute_code tool with script_path: /app/art_code/generated/measure_isoprenol_xyz789.py"
+    script_path: "{project_root}/art_code/generated/measure_isoprenol_xyz789.py",
+    output_file: "{project_root}/media_opt/results_DBTL1.csv",
+    next_step: "Use execute_code tool with script_path: {project_root}/art_code/generated/measure_isoprenol_xyz789.py"
   }}
   Check: status_code 201 ✓
   Report: "Script generated for isoprenol predictions"
 
-Step 2: execute_code("/app/art_code/generated/measure_isoprenol_xyz789.py")
+Step 2: execute_code("{project_root}/art_code/generated/measure_isoprenol_xyz789.py")
   Response: "SUCCESS: 50 predictions completed\nPredictions: [1.5, 2.3, 1.8, ..., 2.1]"
   Check: "SUCCESS" in output ✓
-  Report: "Predictions completed and written to /app/media_opt/results_DBTL1.csv"
+  Report: "Predictions completed and written to {project_root}/media_opt/results_DBTL1.csv"
 
-Final Report: "Isoprenol prediction complete. Generated 50 predictions in /app/media_opt/results_DBTL1.csv (measurement_id: isop_batch_abc123)"
+Final Report: "Isoprenol prediction complete. Generated 50 predictions in {project_root}/media_opt/results_DBTL1.csv (measurement_id: isop_batch_abc123)"
 ```
 
 ## Error Handling

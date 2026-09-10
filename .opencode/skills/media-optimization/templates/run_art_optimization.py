@@ -26,10 +26,10 @@ from stocks_bounds_lib import transform_bounds_for_art, inverse_transform_recomm
 # Configuration — edit these paths for each project
 # ---------------------------------------------------------------------------
 
-DATA_FILE    = '/app/projects/<PROJECT_SLUG>/data/training_data.csv'  # set to None for initial cycle
-ART_CONFIG   = '/app/projects/<PROJECT_SLUG>/art_config.csv'
-BOUNDS_FILE  = '/app/projects/<PROJECT_SLUG>/feasible_bounds.csv'
-OUTPUT_DIR   = '/app/projects/<PROJECT_SLUG>/art_output/'
+DATA_FILE    = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/data/training_data.csv'  # set to None for initial cycle
+ART_CONFIG   = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/art_config.csv'
+BOUNDS_FILE  = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/feasible_bounds.csv'
+OUTPUT_DIR   = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/art_output/'
 
 # ---------------------------------------------------------------------------
 # Load config

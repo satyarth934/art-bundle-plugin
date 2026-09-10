@@ -18,11 +18,11 @@ import numpy as np
 # Configuration — edit these paths for each project
 # ---------------------------------------------------------------------------
 
-INSTRUCTIONS_FILE = '/app/projects/<PROJECT_SLUG>/lh_outputs/lh_instructions_quarter.csv'
-TARGETS_FILE      = '/app/projects/<PROJECT_SLUG>/target_concentrations.csv'
-STOCKS_FILE       = '/app/projects/<PROJECT_SLUG>/stock_concentrations.csv'
-CONFIG_FILE       = '/app/projects/<PROJECT_SLUG>/experiment_config.csv'
-OUTPUT_DIR        = '/app/projects/<PROJECT_SLUG>/lh_outputs/'
+INSTRUCTIONS_FILE = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/lh_outputs/lh_instructions_quarter.csv'
+TARGETS_FILE      = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/target_concentrations.csv'
+STOCKS_FILE       = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/stock_concentrations.csv'
+CONFIG_FILE       = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/experiment_config.csv'
+OUTPUT_DIR        = '/shared/user_impl_alpha/<USER_EMAIL>/<PROJECT_SLUG>/lh_outputs/'
 
 VOL_TOL  = 0.01    # uL
 CONC_TOL = 0.001   # relative
