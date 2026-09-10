@@ -11,7 +11,11 @@ set -e
 #   Option 1: Direct execution (if you have cloned the repo)
 #     ./install.sh
 #
-#   Option 2: One-command installation via curl (recommended)
+#   Option 2: Local development source override
+#     ART_BUNDLE_PLUGIN_DIR=/path/to/art-bundle-plugin ./install.sh
+#     (Useful for testing uncommitted local changes.)
+#
+#   Option 3: One-command installation via curl (recommended)
 #     curl -fsSL https://raw.githubusercontent.com/satyarth934/art-bundle-plugin/<COMMIT_SHA>/install.sh | bash
 #     (Replace <COMMIT_SHA> with actual commit hash - see README.md)
 #
@@ -56,8 +60,25 @@ COMMIT_SHA="fdae7a381a1034af9936f51674addfa0e740f3fd"  # TODO: Replace with actu
 REPO_URL="https://github.com/satyarth934/art-bundle-plugin.git"
 ART_MCP_URL="https://art-mcp-1005318772721.us-west1.run.app/mcp"
 
-# Detect if running from local `install.sh` or being piped via curl
-if [ -f "install.sh" ] && [ -d ".opencode" ]; then
+# Detect an explicitly supplied local source, a local checkout, or curl piping.
+if [ -n "${ART_BUNDLE_PLUGIN_DIR:-}" ]; then
+    if [ ! -d "$ART_BUNDLE_PLUGIN_DIR" ]; then
+        echo "ERROR: ART_BUNDLE_PLUGIN_DIR is not a directory: $ART_BUNDLE_PLUGIN_DIR" >&2
+        exit 1
+    fi
+
+    PLUGIN_DIR="$(cd "$ART_BUNDLE_PLUGIN_DIR" && pwd)"
+    if [ ! -d "$PLUGIN_DIR/.opencode/skills" ] \
+        || [ ! -d "$PLUGIN_DIR/.opencode/agents" ] \
+        || [ ! -f "$PLUGIN_DIR/opencode-mcp-config.jsonc" ]; then
+        echo "ERROR: ART_BUNDLE_PLUGIN_DIR does not appear to be a valid ART Bundle Plugin repository: $PLUGIN_DIR" >&2
+        echo "ERROR: Expected .opencode/skills, .opencode/agents, and opencode-mcp-config.jsonc" >&2
+        exit 1
+    fi
+
+    echo "Using local plugin source: $PLUGIN_DIR"
+    REPO_CLONED=true
+elif [ -f "install.sh" ] && [ -d ".opencode" ]; then
     # Running from extracted/cloned repository
     PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     REPO_CLONED=true
@@ -292,6 +313,7 @@ copy_files() {
     # Create target directories if they don't exist
     mkdir -p "$OPENCODE_DIR/skills"
     mkdir -p "$OPENCODE_DIR/agents"
+    mkdir -p "$OPENCODE_DIR/plugins"
     
     # Dynamically copy ALL skills from plugin repo
     if [ -d "$PLUGIN_DIR/.opencode/skills" ]; then
@@ -335,7 +357,6 @@ copy_files() {
     
     # Copy plugins (ART MCP deployment mode detector, etc.)
     if [ -d "$PLUGIN_DIR/.opencode/plugins" ]; then
-        mkdir -p "$OPENCODE_DIR/plugins"
         plugin_count=0
         for plugin_file in "$PLUGIN_DIR/.opencode/plugins"/*.ts; do
             if [ -f "$plugin_file" ]; then
