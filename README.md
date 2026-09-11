@@ -16,7 +16,7 @@ This plugin provides everything you need to design and execute media optimizatio
 
 ---
 
-## Quick Start (4 Steps)
+## Quick Start
 
 ### 1. Prerequisites
 
@@ -25,19 +25,18 @@ This plugin provides everything you need to design and execute media optimizatio
 
 ### 2. Install the Plugin
 
-**IMPORTANT**: This plugin ONLY installs at the project level (local `.opencode/` directory). Global installation to `~/.opencode/` is NOT supported.
+Run the installer from your project repository. It installs only into the project's local `.opencode/` directory; global installation to `~/.opencode/` is not supported.
+
+Set your ART-MCP authentication key, then run the pinned installer:
 
 ```bash
-# Clone or download this repository
-git clone <repository-url> art-bundle-plugin
-cd art-bundle-plugin
-
-# Create local OpenCode directory
-mkdir .opencode
-
-# Run the installation script
-./install.sh
+export ARTMCP_AUTH_API_KEY="your-api-key"
+curl -fsSL \
+  https://raw.githubusercontent.com/satyarth934/art-bundle-plugin/v1.0.0/install.sh \
+  | bash
 ```
+
+The installer creates `.opencode/` when needed, merges the ART-MCP configuration, and copies the skills, agents, plugin, and remote container path guard.
 
 The script will:
 - Find your local `.opencode/` directory
