@@ -12,42 +12,42 @@ This document captures key design decisions made during the development of the A
 
 ---
 
-## 1. Installation Approach: One-Command curl with Commit SHA Pinning
+## 1. Installation Approach: One-Command curl with Dynamic Version Resolution
 
 ### Decision
 
-Users install via a single command:
+Users install via a single stable entrypoint URL on `main`:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/satyarth934/art-bundle-plugin/<COMMIT_SHA>/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/satyarth934/art-bundle-plugin/main/install.sh | bash
 ```
 
-The commit SHA is pinned inside the script itself for supply chain security.
+The installer dynamically resolves the latest stable release at runtime (skipping pre-release candidates) and downloads the corresponding release archive directly without requiring a Git client. Specific versions or pre-release candidates can be explicitly selected via `ART_BUNDLE_PLUGIN_VERSION` or `--version`.
 
 ### Rationale
 
-**One-Command UX**: Lowers barrier to entry. Users don't need to understand git cloning, directory structure, or multiple steps. They copy-paste one line and installation completes.
+**One-Command UX**: Lowers barrier to entry. Users don't need to clone repositories or manage manual paths. They copy-paste one stable line from documentation.
 
-**Commit SHA Pinning**: Protects against supply chain attacks. Branch names (main, master) are mutable. If a hacker compromises the repository, they can change the script on main, and user automation will blindly run malware. Pinning to an immutable commit SHA means:
-- Old URLs always point to the safe version that was tested and released
-- If the repo is compromised, new commits generate new SHAs
-- Users cannot accidentally download compromised code via old documentation
+**Decoupled Release Workflow**: Decouples the installer bootstrap from the release payload, permanently solving the chicken-and-egg release tagging cycle. Creating a release tag on GitHub automatically becomes available to installer users without requiring a follow-up commit to update hardcoded versions inside the script.
 
-**git clone --depth 1**: Minimal download overhead. Only fetches the specific commit needed, not entire repository history.
+**Rate-Limit-Safe Resolution**: Uses HTTP redirect inspection on `/releases/latest` rather than unauthenticated GitHub REST API calls, completely avoiding GitHub API rate limiting (HTTP 403) on shared corporate IPs or CI runners.
+
+**Fast Tarball Streaming**: Directly streams and extracts `/archive/refs/tags/<version>.tar.gz` to a temporary directory with automatic `trap` cleanup on exit. Avoids `git clone` overhead and client Git dependencies.
+
+**Pre-release Protection**: By default, `/releases/latest` resolves only official releases, preventing experimental `-rc` or `-beta` builds from reaching general users unless explicitly requested via `ART_BUNDLE_PLUGIN_VERSION=v1.1.0-rc.1`.
 
 ### Trade-offs
 
 | Aspect | Trade-off |
 |--------|-----------|
-| **Security** | Must manually update COMMIT_SHA variable on each release |
-| **Simplicity** | Script is more complex (handles both piped and direct execution) |
-| **Discovery** | Users don't see or understand the commit SHA (hidden in script) |
+| **Network** | Requires HTTPS connectivity to GitHub to fetch archives |
+| **Simplicity** | Script handles multiple execution modes (piped curl, local checkout, directory override) |
+| **Namespace Isolation** | Requires namespaced variable `ART_BUNDLE_PLUGIN_VERSION` to prevent accidental shell collisions |
 
 ### Future Improvements
 
-- [ ] **Automated release process**: GitHub Actions could update COMMIT_SHA automatically on release
-- [ ] **Version pinning alternative**: Support `@v1.0.0` style tags in addition to commit SHAs
-- [ ] **Signature verification**: Add GPG signature verification to prevent tampering
+- [ ] **Signature verification**: Add GPG/cosign signature verification for release archives
 - [ ] **Release notes integration**: Link to release notes showing what changed since last version
+- [ ] **Checksum validation**: Verify SHA256 checksums of downloaded tarballs against release manifests
 
 ---
 
@@ -177,28 +177,32 @@ The install script warning message explicitly recommends this granular approach 
 
 ---
 
-## 5. Repository Cloning Strategy
+## 5. Artifact Retrieval & Temporary Directory Strategy
 
 ### Decision
 
-When script is piped via curl, it automatically clones the repository to `/tmp/art-bundle-plugin-install/`.
+When script is piped via curl, it resolves the target release archive, creates a temporary directory using `mktemp -d`, streams and unpacks the tarball directly, and registers a `trap` to ensure complete cleanup on exit.
 
 ### Rationale
 
-**Separation**: Temporary directory keeps installation files separate from user's current directory.
+**Separation**: Temporary directory keeps installation files isolated from the user's workspace until selected files are deployed to `.opencode/`.
 
-**Cleanup**: Temporary directory is platform-standard for disposable files.
+**Automatic Cleanup**: The `trap 'rm -rf "${TMP_DIR}"' EXIT` guarantees the temporary directory is removed whether the installation succeeds, fails, or is interrupted.
 
-**Flexibility**: If running from extracted repo, script detects this and uses existing files instead of cloning.
+**Flexibility**: If running from a cloned repo or with `ART_BUNDLE_PLUGIN_DIR` set, the script skips remote downloading and installs directly from local files.
 
 ### Detection Logic
 
 ```bash
-if [ -f "install.sh" ] && [ -d ".opencode" ]; then
-    # Running from extracted repository
+if [ -n "${ART_BUNDLE_PLUGIN_DIR:-}" ]; then
+    PLUGIN_DIR="$(cd "$ART_BUNDLE_PLUGIN_DIR" && pwd)"
+    REPO_CLONED=true
+elif [ -f "install.sh" ] && [ -d ".opencode" ]; then
+    PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
     REPO_CLONED=true
 else
-    # Being piped via curl - clone to temp
+    # Being piped via curl - download archive to a temporary directory
+    PLUGIN_DIR=""
     REPO_CLONED=false
 fi
 ```
@@ -207,16 +211,14 @@ fi
 
 | Aspect | Trade-off |
 |--------|-----------|
-| **Cleanup** | Temporary directory may not clean up if script fails |
-| **Permissions** | /tmp may have permission restrictions on some systems |
-| **Discoverability** | Users don't see where files are cloned |
+| **Tarball Generation** | Relies on GitHub archive endpoints to provide `.tar.gz` files |
+| **Permissions** | Requires write permissions in the OS temporary directory (`/tmp`) |
 
 ### Future Improvements
 
-- [ ] **Configurable temp directory**: Allow users to specify where clone happens
-- [ ] **Cleanup on exit**: Use trap to ensure /tmp cleanup even on failure
-- [ ] **Persistent cache**: Option to cache clone for offline installation
-- [ ] **Verbose mode**: Show users where files are being cloned/copied from
+- [ ] **Configurable temp directory**: Allow users to specify where temporary extraction happens
+- [ ] **Persistent cache**: Option to cache tarballs for offline installation
+- [ ] **Verbose mode**: Show users detailed extraction steps and file lists
 
 ---
 
@@ -349,21 +351,19 @@ Rather than centralizing all documentation, we distribute it:
 
 ### Current Approach (v1)
 
-**Manual Release Process**:
-1. Merge feature branch to main
-2. Get commit SHA of release commit
-3. Update `COMMIT_SHA` variable in `install.sh`
-4. Update README.md with new curl command
-5. Create GitHub release with release notes
-6. Tag commit with version number
+**Release Process**:
+1. Merge feature branch to `main`
+2. Create and push a Git tag (e.g., `v1.0.0` or `v1.1.0-rc.1` for release candidates)
+3. Publish a GitHub Release targeting the tag (mark release candidates as "Pre-release")
+4. The installer on `main/install.sh` automatically resolves the new stable release without requiring code changes or circular commits
 
-### Rationale for Manual
+### Rationale
 
-**Simplicity**: v1 doesn't need automation. Manual process is straightforward.
+**Zero Circular Dependencies**: Eliminates the chicken-and-egg commit cycle where the installer needed hardcoded commit SHAs or version strings before the release commit existed.
 
-**Control**: Explicit control over what gets released and when.
+**Pre-release Isolation**: Releases marked as "Pre-release" on GitHub are automatically ignored by `/releases/latest`, ensuring only tested stable builds reach general users by default.
 
-**Learning**: Understand the process before automating.
+**Direct RC Testing**: Testers and developers can test pre-releases by passing `ART_BUNDLE_PLUGIN_VERSION=v1.1.0-rc.1` without disrupting stable users.
 
 ### Future Improvements (v2+)
 
@@ -419,7 +419,7 @@ When v2 hybrid approach is implemented:
 ### High Priority
 
 1. **Automated releases** (v2 roadmap)
-   - GitHub Actions workflow to update COMMIT_SHA
+   - GitHub Actions workflow to tag and publish releases
    - Automated changelog generation
    - Status: Documented in HYBRID_MIGRATION.md
 
