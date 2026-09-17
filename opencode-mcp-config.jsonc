@@ -1,10 +1,8 @@
 // ART Bundle Plugin - MCP Configuration Template
 // 
 // This file shows how the MCP server is configured in your opencode.jsonc
-// The install.sh script will automatically merge this configuration into your local .opencode/opencode.jsonc
+// The install.sh script will automatically merge this configuration into your local .opencode/opencode.jsonc or .opencode/opencode.json (if it exists)
 //
-// Source of truth for cloud MCP endpoint:
-// https://art-mcp-1005318772721.us-west1.run.app/mcp
 
 {
   "mcp": {
@@ -22,6 +20,9 @@
         "Authorization": "Bearer {env:ARTMCP_AUTH_API_KEY}"
       },
       
+      // 1 hour timeout for long-running operations
+      "timeout": 3600000,
+
       // Enable this MCP server
       "enabled": true
     }
