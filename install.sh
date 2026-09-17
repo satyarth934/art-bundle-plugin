@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -eo pipefail
 
 # ============================================================================
 # ART Bundle Plugin Installation Script
@@ -16,27 +16,26 @@ set -e
 #     (Useful for testing uncommitted local changes.)
 #
 #   Option 3: One-command installation via curl (recommended)
-#     curl -fsSL https://raw.githubusercontent.com/satyarth934/art-bundle-plugin/<COMMIT_SHA>/install.sh | bash
-#     (Replace <COMMIT_SHA> with actual commit hash - see README.md)
+#     curl -fsSL https://raw.githubusercontent.com/satyarth934/art-bundle-plugin/main/install.sh | bash
+#
+#   Option 4: Install specific version or pre-release candidate
+#     curl -fsSL https://raw.githubusercontent.com/satyarth934/art-bundle-plugin/main/install.sh | ART_BUNDLE_PLUGIN_VERSION=v1.1.0-rc.1 bash
+#     # or via CLI argument:
+#     curl -fsSL https://raw.githubusercontent.com/satyarth934/art-bundle-plugin/main/install.sh | bash -s -- --version v1.1.0-rc.1
 #
 # Requirements:
 #   - OpenCode must be installed
 #   - Local .opencode/ directory (script will create if missing)
-#   - git command available
-#   - curl command available for connectivity testing
+#   - curl and tar commands available
 #
 # What this script does:
-#   1. Clones repository (if not already present)
+#   1. Resolves target version & downloads plugin files
 #   2. Creates .opencode/ directory (if missing)
 #   3. Detects if already installed (prevents duplicate installs)
-#   4. Copies skills and agents to your installation
+#   4. Copies skills, agents, and plugins to your installation
 #   5. Merges MCP configuration into opencode.json(c)
-#   6. Tests connectivity to the MCP server
+#   6. Configures environment / path guards
 #   7. Displays next steps
-#
-# Supply Chain Security:
-#   This script pins to a specific commit SHA to protect against
-#   supply chain attacks. See docs/DESIGN_CHOICES.md for details.
 # ============================================================================
 
 # Colors for output
@@ -47,48 +46,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # ============================================================================
-# Configuration & Constants
-# ============================================================================
-
-# SECURITY: Commit SHA is pinned for supply chain security
-# Update this when releasing new versions
-# See docs/DESIGN_CHOICES.md for rationale
-COMMIT_SHA="9536d4e9bd4cc8bfa266689f0d36a5bfdfba456e"
-
-# Repository configuration
-REPO_URL="https://github.com/satyarth934/art-bundle-plugin.git"
-ART_MCP_URL="https://art-mcp-1005318772721.us-west1.run.app/mcp"
-
-# Detect an explicitly supplied local source, a local checkout, or curl piping.
-if [ -n "${ART_BUNDLE_PLUGIN_DIR:-}" ]; then
-    if [ ! -d "$ART_BUNDLE_PLUGIN_DIR" ]; then
-        echo "ERROR: ART_BUNDLE_PLUGIN_DIR is not a directory: $ART_BUNDLE_PLUGIN_DIR" >&2
-        exit 1
-    fi
-
-    PLUGIN_DIR="$(cd "$ART_BUNDLE_PLUGIN_DIR" && pwd)"
-    if [ ! -d "$PLUGIN_DIR/.opencode/skills" ] \
-        || [ ! -d "$PLUGIN_DIR/.opencode/agents" ] \
-        || [ ! -f "$PLUGIN_DIR/opencode-mcp-config.jsonc" ]; then
-        echo "ERROR: ART_BUNDLE_PLUGIN_DIR does not appear to be a valid ART Bundle Plugin repository: $PLUGIN_DIR" >&2
-        echo "ERROR: Expected .opencode/skills, .opencode/agents, and opencode-mcp-config.jsonc" >&2
-        exit 1
-    fi
-
-    echo "Using local plugin source: $PLUGIN_DIR"
-    REPO_CLONED=true
-elif [ -f "install.sh" ] && [ -d ".opencode" ]; then
-    # Running from extracted/cloned repository
-    PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    REPO_CLONED=true
-else
-    # Being piped via curl - need to clone repository
-    PLUGIN_DIR="/tmp/art-bundle-plugin-install"
-    REPO_CLONED=false
-fi
-
-# ============================================================================
-# Helper Functions
+# Helper Functions (Logging)
 # ============================================================================
 
 log_info() {
@@ -108,55 +66,135 @@ log_error() {
 }
 
 # ============================================================================
-# Repository Setup (handles both direct execution and curl piping)
+# Configuration & Constants
 # ============================================================================
 
+REPO_OWNER="satyarth934"
+REPO_NAME="art-bundle-plugin"
+REPO="${REPO_OWNER}/${REPO_NAME}"
+REPO_URL="https://github.com/${REPO}"
+ART_MCP_URL="https://art-mcp-1005318772721.us-west1.run.app/mcp"
+
+# ============================================================================
+# Argument Parsing & Environment Detection
+# ============================================================================
+
+parse_arguments() {
+    REQUESTED_VERSION="${ART_BUNDLE_PLUGIN_VERSION:-}"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -v|--version)
+                if [ -n "${2:-}" ]; then
+                    REQUESTED_VERSION="$2"
+                    shift 2
+                else
+                    log_error "Error: --version requires a version argument"
+                    exit 1
+                fi
+                ;;
+            *)
+                if [ -z "$REQUESTED_VERSION" ]; then
+                    REQUESTED_VERSION="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+}
+
+detect_plugin_source() {
+    if [ -n "${ART_BUNDLE_PLUGIN_DIR:-}" ]; then
+        if [ ! -d "$ART_BUNDLE_PLUGIN_DIR" ]; then
+            log_error "ART_BUNDLE_PLUGIN_DIR is not a directory: $ART_BUNDLE_PLUGIN_DIR"
+            exit 1
+        fi
+
+        PLUGIN_DIR="$(cd "$ART_BUNDLE_PLUGIN_DIR" && pwd)"
+        if [ ! -d "$PLUGIN_DIR/.opencode/skills" ] \
+            || [ ! -d "$PLUGIN_DIR/.opencode/agents" ] \
+            || [ ! -f "$PLUGIN_DIR/opencode-mcp-config.jsonc" ]; then
+            log_error "ART_BUNDLE_PLUGIN_DIR does not appear to be a valid ART Bundle Plugin repository: $PLUGIN_DIR"
+            log_error "Expected .opencode/skills, .opencode/agents, and opencode-mcp-config.jsonc"
+            exit 1
+        fi
+
+        log_info "Using local plugin source: $PLUGIN_DIR"
+        REPO_CLONED=true
+    elif [ -f "install.sh" ] && [ -d ".opencode" ]; then
+        # Running from extracted/cloned repository
+        PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+        REPO_CLONED=true
+    else
+        # Being piped via curl - will be set to a temporary directory in ensure_repository_available
+        PLUGIN_DIR=""
+        REPO_CLONED=false
+    fi
+}
+
+# ============================================================================
+# Version Resolution & Repository Setup
+# ============================================================================
+
+resolve_target_version() {
+    if [ -n "$REQUESTED_VERSION" ]; then
+        TARGET_VERSION="$REQUESTED_VERSION"
+        log_info "Target version explicitly specified: $TARGET_VERSION"
+        return 0
+    fi
+
+    log_info "Resolving latest stable release..."
+
+    # Method 1: Follow HTTP redirect for /releases/latest (skips pre-releases/RCs, avoids API rate limits)
+    local latest_url
+    latest_url=$(curl -fsSIL -o /dev/null -w '%{url_effective}' "${REPO_URL}/releases/latest" 2>/dev/null || true)
+    TARGET_VERSION="${latest_url##*/}"
+
+    # Method 2: Fallback to GitHub tags API if no formal Release exists yet
+    if [ -z "$TARGET_VERSION" ] || [ "$TARGET_VERSION" = "latest" ]; then
+        TARGET_VERSION=$(curl -sL "https://api.github.com/repos/${REPO}/tags" 2>/dev/null \
+            | grep '"name":' \
+            | sed -E 's/.*"([^"]+)".*/\1/' \
+            | grep -vE '-(rc|alpha|beta|dev)' \
+            | sort -V \
+            | tail -n 1 || true)
+    fi
+
+    # Method 3: Fallback to 'main' branch if repository has no release tags yet
+    if [ -z "$TARGET_VERSION" ] || [ "$TARGET_VERSION" = "null" ]; then
+        TARGET_VERSION="main"
+        log_warning "Could not detect release tag. Defaulting to branch: ${TARGET_VERSION}"
+    else
+        log_success "Resolved latest stable version: ${TARGET_VERSION}"
+    fi
+}
+
 ensure_repository_available() {
-    log_info "Step 0/5: Ensuring plugin files are available..."
+    log_info "Step 0/6: Ensuring plugin files are available..."
     
-    # Exiting the function if the repository is already cloned
+    # Exiting the function if the repository is already cloned / local
     if [ "$REPO_CLONED" = true ]; then
-        log_success "Running from extracted plugin directory"
+        log_success "Running from local plugin directory: $PLUGIN_DIR"
         return 0
     fi
     
-    # Being piped via curl - need to clone repository
-    log_info "Cloning plugin repository..."
-    
-    if ! command -v git &> /dev/null; then
-        log_error "git command not found. Please install git and try again."
-        exit 1
-    fi
-    
-    # Only clean the temp directory when being piped via curl
-    if [ "$REPO_CLONED" = false ]; then
-        rm -rf "$PLUGIN_DIR" 2>/dev/null
-        log_info "Cleaning any previous installation attempt..."
-    fi
+    resolve_target_version
 
-    # Clone with depth 1 for minimal download
-    git clone --depth 1 "$REPO_URL" "$PLUGIN_DIR" 2>/dev/null || {
-        log_error "Failed to clone repository from $REPO_URL"
+    # Being piped via curl - download archive to a temporary directory
+    TMP_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t 'art-bundle-plugin')
+    trap 'rm -rf "${TMP_DIR}"' EXIT
+    PLUGIN_DIR="${TMP_DIR}"
+
+    log_info "Downloading ${REPO} (${TARGET_VERSION})..."
+
+    # Download and extract archive (works for tags, branches, and commit SHAs)
+    local tarball_url="${REPO_URL}/archive/${TARGET_VERSION}.tar.gz"
+    if ! curl -sLf "${tarball_url}" | tar -xz -C "${TMP_DIR}" --strip-components=1 2>/dev/null; then
+        log_error "Failed to download version '${TARGET_VERSION}' from ${REPO_URL}"
+        log_info "Please verify the version, tag, or branch name exists."
         exit 1
-    }
-    
-    # Checkout specific commit SHA for security
-    if [ "$COMMIT_SHA" != "main" ]; then
-        # Use subshell to isolate cd - automatically returns to original directory
-        (
-            cd "$PLUGIN_DIR"
-            git fetch --depth 1 origin "$COMMIT_SHA" 2>/dev/null || {
-                log_error "Failed to fetch commit $COMMIT_SHA"
-                exit 1
-            }
-            git checkout "$COMMIT_SHA" 2>/dev/null || {
-                log_error "Failed to checkout commit $COMMIT_SHA"
-                exit 1
-            }
-        ) || exit 1
     fi
     
-    log_success "Plugin files ready"
+    log_success "Plugin files ready (${TARGET_VERSION})"
 }
 
 # ============================================================================
@@ -576,6 +614,12 @@ main() {
     echo "======================================================================"
     echo ""
     
+    # Parse CLI arguments and environment variables
+    parse_arguments "$@"
+
+    # Detect execution environment (local checkout vs curl piping)
+    detect_plugin_source
+
     # Step 0: Ensure repository is available (handles curl piping)
     ensure_repository_available
     
@@ -602,4 +646,4 @@ main() {
 }
 
 # Run main installation
-main
+main "$@"

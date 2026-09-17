@@ -27,25 +27,37 @@ This plugin provides everything you need to design and execute media optimizatio
 
 Run the installer from your project repository. It installs only into the project's local `.opencode/` directory; global installation to `~/.opencode/` is not supported.
 
-Set your ART-MCP authentication key, then run the pinned installer:
+Set your ART-MCP authentication key, then run the installer:
 
 ```bash
 export ARTMCP_AUTH_API_KEY="your-api-key"
-curl -fsSL \
-  https://raw.githubusercontent.com/satyarth934/art-bundle-plugin/v1.0.0/install.sh \
-  | bash
+curl -fsSL https://raw.githubusercontent.com/satyarth934/art-bundle-plugin/main/install.sh | bash
+```
+
+The installer dynamically resolves the latest stable release (skipping pre-release candidates) and downloads the release archive directly.
+
+#### Installing Specific Versions or Release Candidates
+
+To install a specific version, release candidate (RC), or branch/commit, pass `ART_BUNDLE_PLUGIN_VERSION`:
+
+```bash
+# Install a specific release or release candidate (RC)
+curl -fsSL https://raw.githubusercontent.com/satyarth934/art-bundle-plugin/main/install.sh | ART_BUNDLE_PLUGIN_VERSION=v1.1.0-rc.1 bash
+
+# Or pass the version via CLI argument:
+curl -fsSL https://raw.githubusercontent.com/satyarth934/art-bundle-plugin/main/install.sh | bash -s -- --version v1.1.0-rc.1
 ```
 
 The installer creates `.opencode/` when needed, merges the ART-MCP configuration, and copies the skills, agents, plugin, and remote container path guard.
 
 The script will:
 - Find your local `.opencode/` directory
-- Copy skills and agents to your project
+- Copy skills, agents, and plugins to your project
 - Configure MCP server connection locally
 - Verify connectivity
 
 For local development, you can install directly from an uncommitted checkout
-without cloning the pinned GitHub revision:
+without downloading GitHub release archives:
 
 ```bash
 ART_BUNDLE_PLUGIN_DIR="/path/to/art-bundle-plugin" ./install.sh
@@ -82,7 +94,8 @@ The skill will prompt you for:
 |-----------|------------|
 | **OpenCode** | v1.0+ |
 | **Node.js** | v14+ (optional, for automatic config merging) |
-| **curl** | For MCP connectivity test |
+| **curl** | For installer downloading and MCP connectivity test |
+| **tar** | For extracting release archives |
 | **Bash** | 4.0+ |
 | **Network** | Access to `https://art-mcp-1005318772721.us-west1.run.app/mcp` |
 
