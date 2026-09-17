@@ -322,7 +322,7 @@ copy_files() {
                 skill_name=$(basename "$skill_dir")
                 cp -r "$skill_dir" "$OPENCODE_DIR/skills/"
                 log_success "Copied skill: $skill_name"
-                ((skill_count++))
+                skill_count=$((skill_count + 1))
             fi
         done
         if [ $skill_count -eq 0 ]; then
@@ -342,7 +342,7 @@ copy_files() {
                 agent_name=$(basename "$agent_file")
                 cp "$agent_file" "$OPENCODE_DIR/agents/"
                 log_success "Copied agent: $agent_name"
-                ((agent_count++))
+                agent_count=$((agent_count + 1))
             fi
         done
         if [ $agent_count -eq 0 ]; then
@@ -362,7 +362,7 @@ copy_files() {
                 plugin_name=$(basename "$plugin_file")
                 cp "$plugin_file" "$OPENCODE_DIR/plugins/"
                 log_success "Copied plugin: $plugin_name"
-                ((plugin_count++))
+                plugin_count=$((plugin_count + 1))
             fi
         done
         if [ $plugin_count -eq 0 ]; then
@@ -488,7 +488,7 @@ show_success_message() {
     log_info "Step 6/6: Installation complete!"
     
     echo ""
-    echo "=========================================================================="
+    echo "======================================================================"
     echo ""
     echo -e "${GREEN}✅ ART Bundle Plugin Installed Successfully!${NC}"
     echo ""
@@ -561,7 +561,7 @@ show_success_message() {
     fi
     
     echo ""
-    echo "=========================================================================="
+    echo "======================================================================"
     echo ""
 }
 
@@ -571,9 +571,9 @@ show_success_message() {
 
 main() {
     echo ""
-    echo "=========================================================================="
+    echo "======================================================================"
     echo "ART Bundle Plugin - Installation Script"
-    echo "=========================================================================="
+    echo "======================================================================"
     echo ""
     
     # Step 0: Ensure repository is available (handles curl piping)
