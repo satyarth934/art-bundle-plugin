@@ -169,7 +169,7 @@ resolve_target_version() {
 }
 
 ensure_repository_available() {
-    log_info "Step 0/6: Ensuring plugin files are available..."
+    log_info "Step 0/5: Ensuring plugin files are available..."
     
     # Exiting the function if the repository is already cloned / local
     if [ "$REPO_CLONED" = true ]; then
@@ -255,38 +255,21 @@ check_already_installed() {
 }
 
 # ============================================================================
-# Create Local OpenCode Directory
+# Create Local OpenCode Directory and Detect Configuration Location
 # ============================================================================
 
 ensure_opencode_dir() {
+    log_info "Step 1/5: Confirming local .opencode directory..."
+
+    # Installation is always project-local; never use ~/.opencode.
     if [ ! -d ".opencode" ]; then
         log_info "Creating local .opencode directory..."
         mkdir -p ".opencode"
         log_success "Created .opencode directory"
     fi
-}
 
-# ============================================================================
-# Detect OpenCode Configuration Location
-# ============================================================================
-
-detect_opencode_config() {
-    log_info "Step 1/6: Confirming local .opencode directory..."
-    
-    # IMPORTANT: Only use LOCAL .opencode directory
-    # We NEVER install globally to ~/.opencode (user home)
-    # This ensures project-level isolation and cleanliness
-    
-    if [ -d ".opencode" ]; then
-        OPENCODE_DIR=".opencode"
-        log_success "Using local .opencode directory"
-        return 0
-    fi
-    
-    # This should not happen since ensure_opencode_dir() runs first
-    # But if we get here, something is wrong
-    log_error "Local .opencode directory missing"
-    exit 1
+    OPENCODE_DIR=".opencode"
+    log_success "Using local .opencode directory"
 }
 
 # ============================================================================
@@ -294,7 +277,7 @@ detect_opencode_config() {
 # ============================================================================
 
 detect_and_export_mcp_environment() {
-    log_info "Step 4/6: Detecting MCP environment..."
+    log_info "Step 4/5: Detecting MCP environment..."
     
     # Check if MCP configuration uses remote type
     OPENCODE_JSON="$OPENCODE_DIR/opencode.json"
@@ -345,7 +328,7 @@ detect_and_export_mcp_environment() {
 # ============================================================================
 
 copy_files() {
-    log_info "Step 2/6: Copying skills, agents, and plugins..."
+    log_info "Step 2/5: Copying skills, agents, and plugins..."
     
     # Create target directories if they don't exist
     mkdir -p "$OPENCODE_DIR/skills"
@@ -416,7 +399,7 @@ copy_files() {
 # ============================================================================
 
 merge_mcp_config() {
-    log_info "Step 3/6: Merging MCP configuration..."
+    log_info "Step 3/5: Merging MCP configuration..."
     
     OPENCODE_JSON="$OPENCODE_DIR/opencode.json"
     OPENCODE_JSONC="$OPENCODE_DIR/opencode.jsonc"
@@ -437,30 +420,80 @@ merge_mcp_config() {
         CONFIG_FILE="$OPENCODE_JSONC"
     fi
     
-    # Check if node is available for JSON manipulation
-    if ! command -v node &> /dev/null; then
-        log_warning "Node.js not found, skipping automatic MCP configuration merge"
-        log_info "Please manually add the following to your $CONFIG_FILE:"
-        echo ""
-        cat "$PLUGIN_DIR/opencode-mcp-config.jsonc"
-        echo ""
-        return 0
-    fi
-    
-    # Use Node.js to merge configuration
-    node << EOF
+    # Check if Python 3 or Node.js is available for JSON manipulation
+    if command -v python3 &> /dev/null; then
+        # Use Python 3 (standard library) to merge configuration
+        python3 - "$CONFIG_FILE" "$PLUGIN_DIR/opencode-mcp-config.jsonc" "$IS_NEW_CONFIG" << 'EOF'
+import sys, json, re
+
+config_file = sys.argv[1]
+template_path = sys.argv[2]
+is_new_config = sys.argv[3] == "true"
+
+def strip_jsonc(text):
+    # Strip /* */ and // comments while protecting string literals
+    comment_pattern = r'"(?:\\.|[^"\\])*"|(/\*.*?\*/|//[^\r\n]*)'
+    no_comments = re.sub(
+        comment_pattern,
+        lambda m: m.group(0) if m.group(1) is None else "",
+        text,
+        flags=re.DOTALL
+    )
+    # Strip trailing commas before closing braces/brackets
+    comma_pattern = r'"(?:\\.|[^"\\])*"|(,\s*([\]\}]))'
+    return re.sub(
+        comma_pattern,
+        lambda m: m.group(0) if m.group(1) is None else m.group(2),
+        no_comments,
+        flags=re.DOTALL
+    )
+
+try:
+    config = {}
+    if not is_new_config:
+        with open(config_file, "r", encoding="utf-8") as f:
+            config = json.loads(strip_jsonc(f.read()))
+
+    if is_new_config:
+        config["$schema"] = "https://opencode.ai/config.json"
+
+    try:
+        with open(template_path, "r", encoding="utf-8") as f:
+            template_config = json.loads(strip_jsonc(f.read()))
+    except FileNotFoundError:
+        raise RuntimeError(f"MCP template not found at {template_path}. This file should be included in the art-bundle-plugin repository.")
+    except Exception as e:
+        raise RuntimeError(f"MCP template at {template_path} contains invalid JSON: {e}")
+
+    # Merge MCP configs: template defaults first, then user's existing config (preserves user's settings)
+    if "mcp" in template_config:
+        merged_mcp = dict(template_config["mcp"])
+        if "mcp" in config and isinstance(config["mcp"], dict):
+            merged_mcp.update(config["mcp"])
+        config["mcp"] = merged_mcp
+
+    with open(config_file, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+        f.write("\n")
+
+    print("✅ MCP configuration merged successfully")
+except Exception as error:
+    sys.stderr.write(f"Error merging configuration: {error}\n")
+    sys.exit(1)
+EOF
+    elif command -v node &> /dev/null; then
+        # Fallback to Node.js if Python 3 is not available
+        node - "$CONFIG_FILE" "$PLUGIN_DIR/opencode-mcp-config.jsonc" "$IS_NEW_CONFIG" << 'EOF'
 const fs = require('fs');
-const configFile = '$CONFIG_FILE';
-const templatePath = '$PLUGIN_DIR/opencode-mcp-config.jsonc';
-const isNewConfig = $([[ "$IS_NEW_CONFIG" == "true" ]] && echo true || echo false);
+const [configFile, templatePath, isNewConfigStr] = process.argv.slice(2);
+const isNewConfig = isNewConfigStr === 'true';
 
 // Strip JSONC comments and trailing commas, protecting string values (e.g. URLs)
-function stripJsoncComments(jsonc) {
-    const noComments = jsonc.replace(
-        /\\\\"|"(?:\\\\"|[^"])*"|(\/\/.*|\/\*[\\s\\S]*?\\*\/)/g,
-        (match, group1) => group1 ? "" : match
-    );
-    return noComments.replace(/,\\s*([\\]}])/g, "\$1");
+function stripJsonc(text) {
+    const commentPattern = /"(?:\\.|[^"\\])*"|(\/\*[\s\S]*?\*\/|\/\/[^\r\n]*)/g;
+    const noComments = text.replace(commentPattern, (match, g1) => g1 ? "" : match);
+    const commaPattern = /"(?:\\.|[^"\\])*"|(,\s*([\]\}]))/g;
+    return noComments.replace(commaPattern, (match, g1, g2) => g1 ? g2 : match);
 }
 
 try {
@@ -469,12 +502,12 @@ try {
     
     if (!isNewConfig) {
         const content = fs.readFileSync(configFile, 'utf8');
-        config = JSON.parse(stripJsoncComments(content));
+        config = JSON.parse(stripJsonc(content));
     }
     
     // Add schema only if creating new config
     if (isNewConfig) {
-        config['\$schema'] = 'https://opencode.ai/config.json';
+        config['$schema'] = 'https://opencode.ai/config.json';
     }
     
     // Read MCP config template from plugin repo
@@ -482,15 +515,14 @@ try {
     try {
         templateContent = fs.readFileSync(templatePath, 'utf8');
     } catch (error) {
-        throw new Error(\`MCP template not found at \${templatePath}. This file should be included in the art-bundle-plugin repository.\`);
+        throw new Error(`MCP template not found at ${templatePath}. This file should be included in the art-bundle-plugin repository.`);
     }
     
     let templateConfig;
     try {
-        templateConfig = JSON.parse(stripJsoncComments(templateContent));
-        
+        templateConfig = JSON.parse(stripJsonc(templateContent));
     } catch (error) {
-        throw new Error(\`MCP template at \${templatePath} contains invalid JSON: \${error.message}\`);
+        throw new Error(`MCP template at ${templatePath} contains invalid JSON: ${error.message}`);
     }
     
     // Merge MCP configs: template defaults first, then user's existing config (preserves user's settings)
@@ -509,6 +541,14 @@ try {
     process.exit(1);
 }
 EOF
+    else
+        log_warning "Neither Python 3 nor Node.js found, skipping automatic MCP configuration merge"
+        log_info "Please manually add the following to your $CONFIG_FILE:"
+        echo ""
+        cat "$PLUGIN_DIR/opencode-mcp-config.jsonc"
+        echo ""
+        return 0
+    fi
     
     if [ $? -eq 0 ]; then
         log_success "MCP configuration merged"
@@ -523,7 +563,7 @@ EOF
 # ============================================================================
 
 show_success_message() {
-    log_info "Step 6/6: Installation complete!"
+    log_info "Step 5/5: Installation complete!"
     
     echo ""
     echo "======================================================================"
@@ -623,25 +663,22 @@ main() {
     # Step 0: Ensure repository is available (handles curl piping)
     ensure_repository_available
     
-    # Step 1: Create .opencode directory if needed
+    # Step 1: Confirm local OpenCode directory and config location
     ensure_opencode_dir
     
     # Check if already installed (idempotency)
     check_already_installed
     
-    # Step 2: Detect OpenCode config location
-    detect_opencode_config
-    
-    # Step 3: Copy files (skills, agents, plugins)
+    # Step 2: Copy files (skills, agents, plugins)
     copy_files
     
-    # Step 4: Merge MCP config
+    # Step 3: Merge MCP config
     merge_mcp_config
     
-    # Step 5: Detect remote MCP and set environment
+    # Step 4: Detect remote MCP and set environment
     detect_and_export_mcp_environment
     
-    # Step 6: Show success message
+    # Step 5: Show success message
     show_success_message
 }
 
