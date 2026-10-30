@@ -32,6 +32,38 @@ test("transport parses FastMCP structuredContent envelopes", async () => {
   assert.equal((await transport.inventory())[0].path, "data/a.csv");
 });
 
+test("transport stats one project-relative path without requesting a full inventory", async () => {
+  const requests: {name: string; args: Record<string, unknown>}[] = [];
+  const fetcher = async (_url: string, init: any) => {
+    const req = JSON.parse(init.body);
+    requests.push({name: req.params.name, args: req.params.arguments});
+    return new Response(JSON.stringify({result: {content: [{type: "text", text: JSON.stringify({path: "scripts/run.py", size: 11, crc32c: "checksum", generation: "8"})}]}}));
+  };
+  const transport = createSyncTransport("https://mcp.example/mcp", "key", "alice@example.com", "demo", fetcher as typeof fetch);
+  assert.deepEqual(await transport.stat("scripts/run.py"), {path: "scripts/run.py", size: 11, crc32c: "checksum", generation: "8"});
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].name, "sync_project_stat");
+  assert.equal(requests[0].args.path, "scripts/run.py");
+});
+
+test("transport maps a missing project-scoped stat to undefined", async () => {
+  const fetcher = async (_url: string, init: any) => {
+    const req = JSON.parse(init.body);
+    return new Response(JSON.stringify({jsonrpc: "2.0", id: req.id, result: {content: [{type: "text", text: "null"}]}}));
+  };
+  const transport = createSyncTransport("https://mcp.example/mcp", "key", "alice@example.com", "demo", fetcher as typeof fetch);
+  assert.equal(await transport.stat("scripts/missing.py"), undefined);
+});
+
+test("transport preserves null in a FastMCP structured stat result", async () => {
+  const fetcher = async (_url: string, init: any) => {
+    const req = JSON.parse(init.body);
+    return new Response(JSON.stringify({jsonrpc: "2.0", id: req.id, result: {structuredContent: {result: null}}}));
+  };
+  const transport = createSyncTransport("https://mcp.example/mcp", "key", "alice@example.com", "demo", fetcher as typeof fetch);
+  assert.equal(await transport.stat("scripts/missing.py"), undefined);
+});
+
 test("transport accepts streamable HTTP SSE MCP responses", async () => {
   const fetcher = async (_url: string, init: any) => {
     const req = JSON.parse(init.body);

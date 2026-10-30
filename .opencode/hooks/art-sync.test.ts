@@ -3,7 +3,21 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { createSyncEngine } from "./art-sync.ts";
+
+const testCrcTable = Array.from({length: 256}, (_, n) => {
+  let value = n;
+  for (let i = 0; i < 8; i++) value = (value >>> 1) ^ ((value & 1) ? 0x82f63b78 : 0);
+  return value >>> 0;
+});
+function testCrc32c(bytes: Buffer) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = testCrcTable[(crc ^ byte) & 255] ^ (crc >>> 8);
+  const result = Buffer.alloc(4);
+  result.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
+  return result.toString("base64");
+}
 
 test("downloads cloud-only files, uploads eligible local-only files and excludes metadata", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
@@ -28,25 +42,177 @@ test("downloads cloud-only files, uploads eligible local-only files and excludes
   } finally { await fs.rm(root, {recursive: true, force: true}); }
 });
 
-test("first-sync mismatch preserves originals and previews cloud version", async () => {
+test("targeted sync uploads one local file without requesting a full inventory", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
+  try {
+    await fs.mkdir(path.join(root, "scripts"));
+    await fs.writeFile(path.join(root, "scripts/run.py"), "print('ok')");
+    const calls: string[] = [];
+    const engine = createSyncEngine(root, {
+      inventory: async () => { throw new Error("targeted sync must not inventory the project"); },
+      stat: async (name: string) => { calls.push(`stat:${name}`); return undefined; },
+      download: async () => { throw new Error("unexpected download"); },
+      upload: async (name: string, bytes: Buffer, generation: string) => {
+        calls.push(`upload:${name}:${generation}:${bytes.toString()}`);
+        return "1";
+      },
+    });
+    await engine.bind("alice@example.com", "demo");
+    const result = await engine.syncPaths(["scripts/run.py"]);
+    assert.deepEqual(result.uploaded, ["scripts/run.py"]);
+    assert.deepEqual(calls, ["stat:scripts/run.py", "upload:scripts/run.py:0:print('ok')"]);
+  } finally { await fs.rm(root, {recursive: true, force: true}); }
+});
+
+test("targeted post-baseline collisions without a prior record remain conflicts", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
+  const cloud = Buffer.from("cloud");
+  try {
+    await fs.mkdir(path.join(root, "scripts"));
+    await fs.writeFile(path.join(root, "scripts/run.py"), "local");
+    await fs.mkdir(path.join(root, ".opencode/art-sync"), {recursive: true});
+    await fs.writeFile(path.join(root, ".opencode/art-sync/state.json"), JSON.stringify({
+      email: "alice@example.com", slug: "demo", records: {}, conflicts: {}, includes: [], bootstrapCompleted: true,
+    }));
+    const engine = createSyncEngine(root, {
+      inventory: async () => { throw new Error("targeted sync must not inventory the project"); },
+      stat: async () => ({path: "scripts/run.py", size: cloud.length, crc32c: testCrc32c(cloud), generation: "2"}),
+      download: async () => cloud,
+      upload: async () => "3",
+    });
+    const result = await engine.syncPaths(["scripts/run.py"]);
+    assert.equal(result.newConflicts.length, 1);
+    assert.equal(await fs.readFile(path.join(root, "scripts/run.py"), "utf8"), "local");
+  } finally { await fs.rm(root, {recursive: true, force: true}); }
+});
+
+test("first-bind mismatch backs up local bytes and installs cloud baseline in one summary", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
   const cloud = Buffer.from("cloud\n");
+  const uploaded: string[] = [];
   try {
     await fs.mkdir(path.join(root, "scripts"));
     await fs.writeFile(path.join(root, "scripts/run.py"), "local\n");
     const engine = createSyncEngine(root, {
       inventory: async () => [{path: "scripts/run.py", size: cloud.length, crc32c: "", generation: "1"}],
       download: async () => cloud,
-      upload: async () => { throw new Error("should not overwrite"); },
+      upload: async (name: string) => { uploaded.push(name); throw new Error("should not overwrite"); },
     });
     await engine.bind("alice@example.com", "demo");
     const result = await engine.sync();
-    assert.equal(result.conflicts.length, 1);
-    assert.equal(await fs.readFile(path.join(root, "scripts/run.py"), "utf8"), "local\n");
-    assert.equal(await fs.readFile(result.conflicts[0].preview, "utf8"), "cloud\n");
-    assert.equal(result.conflicts[0].preview.startsWith(root), false);
-    assert.match(result.conflicts[0].diff, /-local/);
-    assert.match(result.conflicts[0].diff, /\+cloud/);
+    assert.deepEqual(result.conflicts, []);
+    assert.deepEqual(result.bootstrap.backedUp, ["scripts/run.py"]);
+    assert.equal(await fs.readFile(path.join(root, "scripts/run.py"), "utf8"), "cloud\n");
+    assert.equal(await fs.readFile(path.join(root, ".opencode/art-sync/bootstrap-backup/scripts/run.py"), "utf8"), "local\n");
+    const state = JSON.parse(await fs.readFile(path.join(root, ".opencode/art-sync/state.json"), "utf8"));
+    assert.equal(state.bootstrapCompleted, true);
+    assert.equal(state.records["scripts/run.py"].generation, "1");
+    assert.equal(state.records["scripts/run.py"].hash, createHash("sha256").update(cloud).digest("hex"));
+    const next = await engine.sync();
+    assert.deepEqual(next.bootstrap.backedUp, []);
+    assert.deepEqual(next.conflicts, []);
+    assert.deepEqual(uploaded, []);
+  } finally { await fs.rm(root, {recursive: true, force: true}); }
+});
+
+test("cloud bootstrap uploads eligible local-only files only when absent remotely", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
+  const cloud = new Map<string, Buffer>();
+  try {
+    await fs.mkdir(path.join(root, "data"));
+    await fs.writeFile(path.join(root, "data/input.csv"), "input");
+    const engine = createSyncEngine(root, {
+      inventory: async () => [...cloud].map(([name, bytes]) => ({path: name, size: bytes.length, crc32c: "", generation: "1"})),
+      download: async (file: {path: string}) => cloud.get(file.path)!,
+      upload: async (name: string, bytes: Buffer, generation: string) => {
+        assert.equal(generation, "0");
+        cloud.set(name, bytes);
+        return "2";
+      },
+    });
+    await engine.bind("alice@example.com", "demo");
+    const result = await engine.sync();
+    assert.deepEqual(result.uploaded, ["data/input.csv"]);
+    assert.equal(cloud.get("data/input.csv")?.toString(), "input");
+    assert.equal(result.bootstrap.completed, true);
+  } finally { await fs.rm(root, {recursive: true, force: true}); }
+});
+
+test("bootstrap remains incomplete after a failed transfer and retries the cloud baseline", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
+  let fail = true;
+  try {
+    await fs.mkdir(path.join(root, "scripts"));
+    await fs.writeFile(path.join(root, "scripts/run.py"), "local");
+    const engine = createSyncEngine(root, {
+      inventory: async () => [{path: "scripts/run.py", size: 5, crc32c: "", generation: "1"}],
+      download: async () => { if (fail) throw new Error("temporary download failure"); return Buffer.from("cloud"); },
+      upload: async () => "2",
+    });
+    await engine.bind("alice@example.com", "demo");
+    const failed = await engine.sync();
+    assert.equal(failed.bootstrap.completed, false);
+    assert.equal(JSON.parse(await fs.readFile(path.join(root, ".opencode/art-sync/state.json"), "utf8")).bootstrapCompleted, false);
+    fail = false;
+    const retried = await engine.sync();
+    assert.equal(retried.bootstrap.completed, true);
+    assert.equal(await fs.readFile(path.join(root, "scripts/run.py"), "utf8"), "cloud");
+  } finally { await fs.rm(root, {recursive: true, force: true}); }
+});
+
+test("bootstrap excludes cache and build artifacts from local and remote inventory", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
+  const cloud = new Map<string, Buffer>([
+    ["scripts/__pycache__/cached.pyc", Buffer.from("remote bytecode")],
+    ["scripts/old.pyo", Buffer.from("remote bytecode")],
+    ["data/.DS_Store", Buffer.from("finder")],
+    ["outputs/.pytest_cache/state", Buffer.from("remote pytest")],
+    ["outputs/.ruff_cache/state", Buffer.from("remote ruff")],
+    ["outputs/.cache/state", Buffer.from("remote cache")],
+    ["data/result.csv.part", Buffer.from("remote partial")],
+    ["outputs/result.csv.tmp-123", Buffer.from("remote partial")],
+    ["data/input.csv.art-sync-deadbeef", Buffer.from("remote partial")],
+    ["data/.tmp-staging/result.csv", Buffer.from("remote partial")],
+  ]);
+  const uploaded: string[] = [];
+  const downloaded: string[] = [];
+  try {
+    await fs.mkdir(path.join(root, "scripts/__pycache__"), {recursive: true});
+    await fs.mkdir(path.join(root, "scripts"), {recursive: true});
+    await fs.mkdir(path.join(root, "data"), {recursive: true});
+    await fs.mkdir(path.join(root, "outputs/.pytest_cache"), {recursive: true});
+    await fs.mkdir(path.join(root, "outputs/.ruff_cache"), {recursive: true});
+    await fs.mkdir(path.join(root, "outputs/.cache"), {recursive: true});
+    await fs.mkdir(path.join(root, "outputs/.mypy_cache"), {recursive: true});
+    await fs.mkdir(path.join(root, "data/.tmp-staging"), {recursive: true});
+    await fs.writeFile(path.join(root, "scripts/__pycache__/cached.pyc"), "local bytecode");
+    await fs.writeFile(path.join(root, "scripts/old.pyo"), "local bytecode");
+    await fs.writeFile(path.join(root, "scripts/temporary.tmp"), "temp");
+    await fs.writeFile(path.join(root, "data/.DS_Store"), "finder");
+    await fs.writeFile(path.join(root, "outputs/.pytest_cache/state"), "pytest");
+    await fs.writeFile(path.join(root, "outputs/.ruff_cache/state"), "ruff");
+    await fs.writeFile(path.join(root, "outputs/.cache/state"), "cache");
+    await fs.writeFile(path.join(root, "outputs/.mypy_cache/state"), "mypy");
+    await fs.writeFile(path.join(root, "data/result.csv.part"), "partial");
+    await fs.writeFile(path.join(root, "outputs/result.csv.tmp-123"), "partial");
+    await fs.writeFile(path.join(root, "data/input.csv.art-sync-deadbeef"), "partial");
+    await fs.writeFile(path.join(root, "data/.tmp-staging/result.csv"), "partial");
+    const engine = createSyncEngine(root, {
+      inventory: async () => [...cloud].map(([name, bytes]) => ({path: name, size: bytes.length, crc32c: "", generation: "1"})),
+      download: async (file: {path: string}) => { downloaded.push(file.path); return cloud.get(file.path)!; },
+      upload: async (name: string, bytes: Buffer) => { uploaded.push(name); cloud.set(name, bytes); return "2"; },
+    });
+    await engine.bind("alice@example.com", "demo");
+    const result = await engine.sync();
+    assert.deepEqual(result.downloaded, []);
+    assert.deepEqual(result.uploaded, []);
+    assert.deepEqual(downloaded, []);
+    assert.deepEqual(uploaded, []);
+    assert.deepEqual([...cloud.keys()].sort(), [
+      "data/.DS_Store", "data/.tmp-staging/result.csv", "data/input.csv.art-sync-deadbeef", "data/result.csv.part",
+      "outputs/.cache/state", "outputs/.pytest_cache/state", "outputs/.ruff_cache/state", "outputs/result.csv.tmp-123",
+      "scripts/__pycache__/cached.pyc", "scripts/old.pyo",
+    ]);
   } finally { await fs.rm(root, {recursive: true, force: true}); }
 });
 
@@ -177,7 +343,7 @@ test("sync requests arriving during a run are followed by a fresh pass", async (
   } finally { await fs.rm(root, {recursive: true, force: true}); }
 });
 
-test("a cloud-only file colliding with an unrelated local file becomes a conflict", async () => {
+test("first bind replaces an unrelated local collision with the cloud baseline", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
   try {
     await fs.mkdir(path.join(root, "final_files"));
@@ -188,8 +354,9 @@ test("a cloud-only file colliding with an unrelated local file becomes a conflic
     });
     await engine.bind("alice@example.com", "demo");
     const result = await engine.sync();
-    assert.equal(result.conflicts.length, 1);
-    assert.equal(await fs.readFile(path.join(root, "final_files/report.md"), "utf8"), "local");
+    assert.deepEqual(result.conflicts, []);
+    assert.equal(await fs.readFile(path.join(root, "final_files/report.md"), "utf8"), "cloud");
+    assert.equal(await fs.readFile(path.join(root, ".opencode/art-sync/bootstrap-backup/final_files/report.md"), "utf8"), "local");
   } finally { await fs.rm(root, {recursive: true, force: true}); }
 });
 
@@ -277,17 +444,22 @@ test("a second sync request preserves conflicts found on the first pass", async 
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     let scans = 0;
+    let generation = "1";
+    let cloud = Buffer.from("cloud");
     const engine = createSyncEngine(root, {
-      inventory: async () => { scans++; if (scans === 1) await gate; return [{path: "scripts/a.py", size: 5, crc32c: "", generation: "1"}]; },
-      download: async () => Buffer.from("cloud"), upload: async () => "2",
+      inventory: async () => { scans++; if (scans === 2) await gate; return [{path: "scripts/a.py", size: cloud.length, crc32c: "", generation}]; },
+      download: async () => cloud, upload: async () => "2",
     });
     await engine.bind("alice@example.com", "demo");
+    await engine.sync();
+    await fs.writeFile(path.join(root, "scripts/a.py"), "local edit");
+    cloud = Buffer.from("cloud2"); generation = "2";
     const first = engine.sync();
     const second = engine.sync();
     release();
     const [result] = await Promise.all([first, second]);
     assert.equal(result.conflicts.length, 1);
-    assert.equal(scans, 2);
+    assert.equal(scans, 3);
   } finally { await fs.rm(root, {recursive: true, force: true}); }
 });
 
@@ -320,16 +492,21 @@ test("preview may not be substituted with an arbitrary local file during resolut
   try {
     await fs.mkdir(path.join(root, "scripts"));
     await fs.writeFile(path.join(root, "scripts/run.py"), "local");
+    let generation = "1";
+    let cloud = Buffer.from("cloud");
     const engine = createSyncEngine(root, {
-      inventory: async () => [{path: "scripts/run.py", size: 5, crc32c: "", generation: "1"}],
-      download: async () => Buffer.from("cloud"), upload: async () => "2",
+      inventory: async () => [{path: "scripts/run.py", size: cloud.length, crc32c: "", generation}],
+      download: async () => cloud, upload: async () => "2",
     });
     await engine.bind("alice@example.com", "demo");
+    await engine.sync();
+    await fs.writeFile(path.join(root, "scripts/run.py"), "local2");
+    cloud = Buffer.from("other"); generation = "2";
     const conflict = (await engine.sync()).conflicts[0];
     const substitute = path.join(unrelated, "fake-preview");
     await fs.writeFile(substitute, "cloud");
     await assert.rejects(engine.resolve(conflict.path, "cloud", substitute, conflict.generation, conflict.localHash), /preview/i);
-    assert.equal(await fs.readFile(path.join(root, "scripts/run.py"), "utf8"), "local");
+    assert.equal(await fs.readFile(path.join(root, "scripts/run.py"), "utf8"), "local2");
   } finally { await fs.rm(root, {recursive: true, force: true}); await fs.rm(unrelated, {recursive: true, force: true}); }
 });
 
@@ -391,15 +568,19 @@ test("conflict resolution rejects cloud changes that happened while user inspect
     await fs.mkdir(path.join(root, "scripts"));
     await fs.writeFile(path.join(root, "scripts/run.py"), "local");
     let generation = "1";
+    let cloud = Buffer.from("cloud");
     const engine = createSyncEngine(root, {
-      inventory: async () => [{path: "scripts/run.py", size: 5, crc32c: "", generation}],
-      download: async () => Buffer.from("cloud"), upload: async () => "2",
+      inventory: async () => [{path: "scripts/run.py", size: cloud.length, crc32c: "", generation}],
+      download: async () => cloud, upload: async () => "2",
     });
     await engine.bind("alice@example.com", "demo");
+    await engine.sync();
+    await fs.writeFile(path.join(root, "scripts/run.py"), "local2");
+    cloud = Buffer.from("other"); generation = "2";
     const conflict = (await engine.sync()).conflicts[0];
-    generation = "2";
+    generation = "3";
     await assert.rejects(engine.resolve(conflict.path, "local", conflict.preview, conflict.generation, conflict.localHash), /Cloud changed/);
-    assert.equal(await fs.readFile(path.join(root, "scripts/run.py"), "utf8"), "local");
+    assert.equal(await fs.readFile(path.join(root, "scripts/run.py"), "utf8"), "local2");
   } finally { await fs.rm(root, {recursive: true, force: true}); }
 });
 
@@ -438,12 +619,17 @@ test("resolving a conflict waits for an ongoing sync in the same project", async
     let block = false, release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     let uploads = 0;
+    let generation = "1";
+    let cloud = Buffer.from("cloud");
     const engine = createSyncEngine(root, {
-      inventory: async () => { if (block) await gate; return [{path: "scripts/run.py", size: 5, crc32c: "", generation: "1"}]; },
-      download: async () => Buffer.from("cloud"),
-      upload: async () => { uploads++; return "2"; },
+      inventory: async () => { if (block) await gate; return [{path: "scripts/run.py", size: cloud.length, crc32c: "", generation}]; },
+      download: async () => cloud,
+      upload: async (_name, bytes) => { uploads++; cloud = bytes; generation = "2"; return generation; },
     });
     await engine.bind("alice@example.com", "demo");
+    await engine.sync();
+    await fs.writeFile(path.join(root, "scripts/run.py"), "local2");
+    cloud = Buffer.from("other"); generation = "2";
     const conflict = (await engine.sync()).conflicts[0];
     block = true;
     const syncing = engine.sync();
@@ -461,17 +647,20 @@ test("keeping cloud version checks local content again before replacing it", asy
   try {
     await fs.mkdir(path.join(root, "scripts"));
     await fs.writeFile(path.join(root, "scripts/run.py"), "local");
+    let generation = "1";
+    let cloud = Buffer.from("cloud");
+    let mutate = false;
     const engine = createSyncEngine(root, {
-      inventory: async () => [{path: "scripts/run.py", size: 5, crc32c: "", generation: "1"}],
-      download: async () => { await fs.writeFile(path.join(root, "scripts/run.py"), "new local"); return Buffer.from("cloud"); },
+      inventory: async () => [{path: "scripts/run.py", size: cloud.length, crc32c: "", generation}],
+      download: async () => { if (mutate) await fs.writeFile(path.join(root, "scripts/run.py"), "new local"); return cloud; },
       upload: async () => "2",
     });
     await engine.bind("alice@example.com", "demo");
-    // Initial cloud download mutates local too, so create a valid conflict with a fresh sync.
-    const first = await engine.sync();
-    assert.equal(first.conflicts.length, 1);
-    await fs.writeFile(path.join(root, "scripts/run.py"), "local");
+    await engine.sync();
+    await fs.writeFile(path.join(root, "scripts/run.py"), "local2");
+    cloud = Buffer.from("other"); generation = "2";
     const conflict = (await engine.sync()).conflicts[0];
+    mutate = true;
     await assert.rejects(engine.resolve(conflict.path, "cloud", conflict.preview, conflict.generation, conflict.localHash), /Local changed/);
     assert.equal(await fs.readFile(path.join(root, "scripts/run.py"), "utf8"), "new local");
   } finally { await fs.rm(root, {recursive: true, force: true}); }
@@ -521,9 +710,11 @@ test("a cloud generation change with identical bytes does not create a conflict"
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
   try {
     let generation = "1";
+    let downloads = 0;
+    const cloud = Buffer.from("same");
     const engine = createSyncEngine(root, {
-      inventory: async () => [{path: "outputs/a.txt", size: 4, crc32c: "", generation}],
-      download: async () => Buffer.from("same"), upload: async () => "3",
+      inventory: async () => [{path: "outputs/a.txt", size: cloud.length, crc32c: testCrc32c(cloud), generation}],
+      download: async () => { downloads++; return cloud; }, upload: async () => "3",
     });
     await engine.bind("alice@example.com", "demo");
     await engine.sync();
@@ -532,6 +723,182 @@ test("a cloud generation change with identical bytes does not create a conflict"
     assert.deepEqual(result.conflicts, []);
     assert.deepEqual(result.failed, []);
     assert.equal((await engine.binding())!.records["outputs/a.txt"].generation, "2");
+    assert.equal(downloads, 1);
+  } finally { await fs.rm(root, {recursive: true, force: true}); }
+});
+
+test("a cloud generation change with unchanged cloud content does not conflict with a local-only edit", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
+  let generation = "1";
+  let cloud = Buffer.from("base");
+  let downloads = 0;
+  try {
+    await fs.mkdir(path.join(root, "scripts"));
+    await fs.writeFile(path.join(root, "scripts/run.py"), "base");
+    const engine = createSyncEngine(root, {
+      inventory: async () => [{path: "scripts/run.py", size: cloud.length, crc32c: testCrc32c(cloud), generation}],
+      download: async () => { downloads++; return cloud; },
+      upload: async (_name: string, bytes: Buffer, expected: string) => { assert.equal(expected, "2"); cloud = bytes; generation = "3"; return generation; },
+    });
+    await engine.bind("alice@example.com", "demo");
+    await engine.sync();
+    await fs.writeFile(path.join(root, "scripts/run.py"), "local edit");
+    generation = "2";
+    const result = await engine.sync();
+    assert.equal(result.newConflicts.length, 0);
+    assert.equal(result.uploaded[0], "scripts/run.py");
+    assert.equal(cloud.toString(), "local edit");
+    assert.equal(downloads, 2);
+  } finally { await fs.rm(root, {recursive: true, force: true}); }
+});
+
+test("unchanged pending conflicts are returned separately and changed fingerprints are new again", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
+  let generation = "1";
+  let cloud = Buffer.from("base");
+  try {
+    await fs.mkdir(path.join(root, "scripts"));
+    await fs.writeFile(path.join(root, "scripts/a.py"), "base");
+    const engine = createSyncEngine(root, {
+      inventory: async () => [{path: "scripts/a.py", size: cloud.length, crc32c: testCrc32c(cloud), generation}],
+      download: async () => cloud,
+      upload: async () => "3",
+    });
+    await engine.bind("alice@example.com", "demo");
+    await engine.sync();
+    await fs.writeFile(path.join(root, "scripts/a.py"), "local edit");
+    cloud = Buffer.from("cloud edit"); generation = "2";
+    const first = await engine.sync();
+    assert.equal(first.newConflicts.length, 1);
+    assert.equal(first.pendingConflicts.length, 1);
+    const pendingState = JSON.parse(await fs.readFile(path.join(root, ".opencode/art-sync/state.json"), "utf8"));
+    assert.deepEqual(pendingState.conflicts["scripts/a.py"], {
+      localHash: createHash("sha256").update("local edit").digest("hex"),
+      cloudHash: createHash("sha256").update("cloud edit").digest("hex"),
+      generation: "2",
+    });
+    const restartedEngine = createSyncEngine(root, {
+      inventory: async () => [{path: "scripts/a.py", size: cloud.length, crc32c: testCrc32c(cloud), generation}],
+      download: async () => cloud,
+      upload: async () => "3",
+    });
+    const unchanged = await restartedEngine.sync();
+    assert.equal(unchanged.newConflicts.length, 0);
+    assert.equal(unchanged.pendingConflicts.length, 1);
+    await fs.writeFile(path.join(root, "scripts/a.py"), "local changed again");
+    cloud = Buffer.from("cloud changed"); generation = "3";
+    const changed = await engine.sync();
+    assert.equal(changed.newConflicts.length, 1);
+    assert.equal(changed.pendingConflicts.length, 1);
+  } finally { await fs.rm(root, {recursive: true, force: true}); }
+});
+
+test("a conflict is cleared when local content returns to the synchronized baseline", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
+  const cloud = Buffer.from("base");
+  try {
+    await fs.mkdir(path.join(root, "final_files"));
+    await fs.writeFile(path.join(root, "final_files/report.txt"), "base");
+    const engine = createSyncEngine(root, {
+      inventory: async () => [{path: "final_files/report.txt", size: cloud.length, crc32c: testCrc32c(cloud), generation: "1"}],
+      download: async () => cloud,
+      upload: async () => "2",
+    });
+    await engine.bind("alice@example.com", "demo");
+    await engine.sync();
+    await fs.writeFile(path.join(root, "final_files/report.txt"), "local change");
+    assert.equal((await engine.sync()).newConflicts.length, 1);
+    await fs.writeFile(path.join(root, "final_files/report.txt"), "base");
+    const reverted = await engine.sync();
+    assert.equal(reverted.pendingConflicts.length, 0);
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, ".opencode/art-sync/state.json"), "utf8")).conflicts, {});
+  } finally { await fs.rm(root, {recursive: true, force: true}); }
+});
+
+test("batch conflict resolution applies defaults, per-path overrides, and local recovery copies", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
+  const cloud = new Map<string, Buffer>([["scripts/a.py", Buffer.from("base a")], ["scripts/b.py", Buffer.from("base b")]]);
+  const generations = new Map([["scripts/a.py", "1"], ["scripts/b.py", "1"]]);
+  try {
+    await fs.mkdir(path.join(root, "scripts"));
+    await fs.writeFile(path.join(root, "scripts/a.py"), "base a");
+    await fs.writeFile(path.join(root, "scripts/b.py"), "base b");
+    const engine = createSyncEngine(root, {
+      inventory: async () => [...cloud].map(([name, bytes]) => ({path: name, size: bytes.length, crc32c: testCrc32c(bytes), generation: generations.get(name)!})),
+      download: async (file: {path: string}) => cloud.get(file.path)!,
+      upload: async (name: string, bytes: Buffer, expected: string) => {
+        assert.equal(expected, generations.get(name));
+        cloud.set(name, bytes);
+        const next = String(Number(expected) + 1);
+        generations.set(name, next);
+        return next;
+      },
+    });
+    await engine.bind("alice@example.com", "demo");
+    await engine.sync();
+    await fs.writeFile(path.join(root, "scripts/a.py"), "local a");
+    await fs.writeFile(path.join(root, "scripts/b.py"), "local b");
+    cloud.set("scripts/a.py", Buffer.from("cloud a")); generations.set("scripts/a.py", "2");
+    cloud.set("scripts/b.py", Buffer.from("cloud b")); generations.set("scripts/b.py", "2");
+    const found = await engine.sync();
+    assert.equal(found.newConflicts.length, 2);
+    const resolved = await engine.resolveBatch({defaultChoice: "cloud", perPathChoices: {"scripts/b.py": "local"}});
+    assert.deepEqual(resolved.resolved.sort(), ["scripts/a.py", "scripts/b.py"]);
+    assert.equal(await fs.readFile(path.join(root, "scripts/a.py"), "utf8"), "cloud a");
+    assert.equal(await fs.readFile(path.join(root, "scripts/b.py"), "utf8"), "local b");
+    assert.equal(await fs.readFile(path.join(root, ".opencode/art-sync/conflict-backup/local/scripts/a.py"), "utf8"), "local a");
+    assert.equal(await fs.readFile(path.join(root, ".opencode/art-sync/conflict-backup/cloud/scripts/b.py"), "utf8"), "cloud b");
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, ".opencode/art-sync/state.json"), "utf8")).conflicts, {});
+  } finally { await fs.rm(root, {recursive: true, force: true}); }
+});
+
+test("batch local resolution requires inclusion outside the upload roots", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
+  let generation = "1";
+  let cloud = Buffer.from("base");
+  try {
+    await fs.mkdir(path.join(root, "final_files"));
+    await fs.writeFile(path.join(root, "final_files/report.txt"), "base");
+    const engine = createSyncEngine(root, {
+      inventory: async () => [{path: "final_files/report.txt", size: cloud.length, crc32c: testCrc32c(cloud), generation}],
+      download: async () => cloud,
+      upload: async (_name: string, bytes: Buffer) => { cloud = bytes; generation = "3"; return generation; },
+    });
+    await engine.bind("alice@example.com", "demo");
+    await engine.sync();
+    await fs.writeFile(path.join(root, "final_files/report.txt"), "local edit");
+    cloud = Buffer.from("cloud edit"); generation = "2";
+    await engine.sync();
+    await assert.rejects(engine.resolveBatch({defaultChoice: "local"}), /art_sync_include/);
+    await engine.include("final_files/report.txt");
+    const resolved = await engine.resolveBatch({defaultChoice: "local"});
+    assert.deepEqual(resolved.resolved, ["final_files/report.txt"]);
+    assert.equal(cloud.toString(), "local edit");
+  } finally { await fs.rm(root, {recursive: true, force: true}); }
+});
+
+test("batch defer keeps conflicts pending and stale cloud generations block resolution", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
+  let generation = "1";
+  let cloud = Buffer.from("base");
+  try {
+    await fs.mkdir(path.join(root, "scripts"));
+    await fs.writeFile(path.join(root, "scripts/run.py"), "base");
+    const engine = createSyncEngine(root, {
+      inventory: async () => [{path: "scripts/run.py", size: cloud.length, crc32c: testCrc32c(cloud), generation}],
+      download: async () => cloud,
+      upload: async () => "4",
+    });
+    await engine.bind("alice@example.com", "demo");
+    await engine.sync();
+    await fs.writeFile(path.join(root, "scripts/run.py"), "local edit");
+    cloud = Buffer.from("cloud edit"); generation = "2";
+    await engine.sync();
+    const deferred = await engine.resolveBatch({defaultChoice: "defer"});
+    assert.deepEqual(deferred, {resolved: [], deferred: ["scripts/run.py"], failed: []});
+    cloud = Buffer.from("new cloud edit"); generation = "3";
+    await assert.rejects(engine.resolveBatch({defaultChoice: "cloud"}), /Cloud changed/);
+    assert.equal(await fs.readFile(path.join(root, "scripts/run.py"), "utf8"), "local edit");
   } finally { await fs.rm(root, {recursive: true, force: true}); }
 });
 
@@ -541,15 +908,20 @@ test("manual cloud resolution does not overwrite a locally changed file during d
     await fs.mkdir(path.join(root, "scripts"));
     await fs.writeFile(path.join(root, "scripts/run.py"), "local");
     let downloadingResolution = false;
+    let generation = "1";
+    let cloud = Buffer.from("cloud");
     const engine = createSyncEngine(root, {
-      inventory: async () => [{path: "scripts/run.py", size: 5, crc32c: "", generation: "1"}],
+      inventory: async () => [{path: "scripts/run.py", size: cloud.length, crc32c: "", generation}],
       download: async () => {
         if (downloadingResolution) await fs.writeFile(path.join(root, "scripts/run.py"), "new edit");
-        return Buffer.from("cloud");
+        return cloud;
       },
       upload: async () => "2",
     });
     await engine.bind("alice@example.com", "demo");
+    await engine.sync();
+    await fs.writeFile(path.join(root, "scripts/run.py"), "local2");
+    cloud = Buffer.from("other"); generation = "2";
     const conflict = (await engine.sync()).conflicts[0];
     downloadingResolution = true;
     await assert.rejects(engine.resolve(conflict.path, "cloud", conflict.preview, conflict.generation, conflict.localHash), /Local changed/);
@@ -653,11 +1025,16 @@ test("a local file edited after conflict preview can be re-reviewed without over
   try {
     await fs.mkdir(path.join(root, "scripts"));
     await fs.writeFile(path.join(root, "scripts/a.py"), "one");
+    let generation = "1";
+    let cloud = Buffer.from("two");
     const engine = createSyncEngine(root, {
-      inventory: async () => [{path: "scripts/a.py", size: 3, crc32c: "", generation: "1"}],
-      download: async () => Buffer.from("two"), upload: async () => "2",
+      inventory: async () => [{path: "scripts/a.py", size: cloud.length, crc32c: "", generation}],
+      download: async () => cloud, upload: async () => "2",
     });
     await engine.bind("alice@example.com", "demo");
+    await engine.sync();
+    await fs.writeFile(path.join(root, "scripts/a.py"), "one");
+    cloud = Buffer.from("sixsix"); generation = "2";
     const first = (await engine.sync()).conflicts[0];
     await fs.writeFile(path.join(root, "scripts/a.py"), "three");
     const next = (await engine.sync()).conflicts[0];
@@ -702,11 +1079,16 @@ test("resolving a conflict after a local file disappears requires a fresh sync",
   try {
     await fs.mkdir(path.join(root, "scripts"));
     await fs.writeFile(path.join(root, "scripts/a.py"), "local");
+    let generation = "1";
+    let cloud = Buffer.from("cloud");
     const engine = createSyncEngine(root, {
-      inventory: async () => [{path: "scripts/a.py", size: 5, crc32c: "", generation: "1"}],
-      download: async () => Buffer.from("cloud"), upload: async () => "2",
+      inventory: async () => [{path: "scripts/a.py", size: cloud.length, crc32c: "", generation}],
+      download: async () => cloud, upload: async () => "2",
     });
     await engine.bind("alice@example.com", "demo");
+    await engine.sync();
+    await fs.writeFile(path.join(root, "scripts/a.py"), "local");
+    cloud = Buffer.from("other"); generation = "2";
     const conflict = (await engine.sync()).conflicts[0];
     await fs.unlink(path.join(root, "scripts/a.py"));
     await assert.rejects(engine.resolve(conflict.path, "cloud", conflict.preview, conflict.generation, conflict.localHash));
