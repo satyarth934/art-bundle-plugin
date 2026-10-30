@@ -213,6 +213,14 @@ In the media-optimization skill:
 
 ## Common Workflows
 
+### Local/cloud project sync (trusted-key pilot)
+
+Install the matching art-mcp server (`sync_project_inventory` and `sync_project_transfer`) and restart OpenCode after installing the updated bundle plugin. The installer adds `.opencode/package.json` if absent for the plugin dependencies; if you already have that file, ensure `@opencode-ai/plugin` and `yaml` are present. OpenCode installs plugin dependencies when loading the project; for a manual Node import run `npm install --prefix .opencode`. Call `art_sync_bind` with your email and project slug to associate the current local folder with `/shared/user_impl_alpha/<email>/<slug>/`; then call `art_sync` for an explicit refresh. Local `scripts/run.py` maps to cloud `scripts/run.py`.
+
+Cloud project files are downloaded except `user.json` and `project.json`; `.git/` and `.opencode/` internals are also excluded. Local uploads include `scripts/`, `data/`, `outputs/`, `logs/` and paths registered using `art_sync_include`. Sync state and a lock are stored in `.opencode/art-sync/`, Git-ignored there; cloud conflict previews are temporary local files outside the project. On a conflict, inspect both local and preview paths and use `art_sync_resolve` with the returned path, preview, generation, localHash (as `local_hash`) and choice (`local` or `cloud`). To keep a manually edited version, refresh the conflict with `art_sync` before choosing `local`; paths outside the four default folders need `art_sync_include` before uploading a local resolution. `art_sync_rebind` explicitly switches cloud projects without removing local files.
+
+Sync runs at binding and for previously bound sessions, after local write/edit (debounced), before and after `execute_code`, on explicit request, and on a missing local read. No automatic deletions or session-idle trigger. Files transfer via short-lived GCS signed URLs; bucket name is visible in the URLs but not configured in the plugin. The server uses `ARTMCP_STORAGE_BUCKET` (default `art-scripts-shared-ese-qmm`); both services must mount the same bucket at `/shared`. The shared API key pilot treats the supplied email as a project selector, **not verified identity**.
+
 ### Workflow 1: Run Complete Optimization Cycle
 
 ```

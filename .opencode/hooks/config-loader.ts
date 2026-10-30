@@ -6,8 +6,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "yaml";
-import { fileLog } from "./file-logger";
-import type { RemoteContainerConfig } from "./types";
+import { fileLog } from "./file-logger.ts";
+import type { RemoteContainerConfig } from "./types.ts";
 
 const DEFAULT_CONFIG_PATH = ".opencode/config/remote-container-paths.yaml";
 

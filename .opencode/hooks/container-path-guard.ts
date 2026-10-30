@@ -4,16 +4,16 @@
  * and redirects to appropriate MCP tools
  */
 
-import type { MCPConfig } from "./types";
+import type { MCPConfig } from "./types.ts";
 import type { PluginInput } from "@opencode-ai/plugin";
 import {
   loadContainerConfig,
   matchContainerPattern,
   extractPathFromArgs,
-} from "./config-loader";
-import { detectMCPTools, isMCPTool } from "./mcp-detector";
-import { logIntercept, generateErrorMessage } from "./logger";
-import { fileLog } from "./file-logger";
+} from "./config-loader.ts";
+import { detectMCPTools, isMCPTool } from "./mcp-detector.ts";
+import { logIntercept, generateErrorMessage } from "./logger.ts";
+import { fileLog } from "./file-logger.ts";
 
 export async function containerPathGuard(
   ctx: PluginInput,

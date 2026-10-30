@@ -1,0 +1,7 @@
+{
+  "type": "module",
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.25",
+    "yaml": "^2.3.0"
+  }
+}

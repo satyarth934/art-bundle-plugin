@@ -3,8 +3,8 @@
  * Uses FastMCP JSON-RPC protocol
  */
 
-import type { MCPConfig } from "./types";
-import { fileLog } from "./file-logger";
+import type { MCPConfig } from "./types.ts";
+import { fileLog } from "./file-logger.ts";
 
 let mcpToolsCache: string[] | null = null;
 

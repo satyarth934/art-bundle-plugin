@@ -315,7 +315,10 @@ detect_and_export_mcp_environment() {
         # Copy hook files
         if [ -d "$PLUGIN_DIR/.opencode/hooks" ]; then
             mkdir -p "$OPENCODE_DIR/hooks"
-            cp "$PLUGIN_DIR/.opencode/hooks"/*.ts "$OPENCODE_DIR/hooks/" 2>/dev/null || true
+            for hook_file in "$PLUGIN_DIR/.opencode/hooks"/*.ts; do
+                case "$hook_file" in *.test.ts) continue ;; esac
+                cp "$hook_file" "$OPENCODE_DIR/hooks/"
+            done
             log_success "Container path guard hooks installed"
         fi
     else
@@ -380,6 +383,7 @@ copy_files() {
         plugin_count=0
         for plugin_file in "$PLUGIN_DIR/.opencode/plugins"/*.ts; do
             if [ -f "$plugin_file" ]; then
+                case "$plugin_file" in *.test.ts) continue ;; esac
                 plugin_name=$(basename "$plugin_file")
                 cp "$plugin_file" "$OPENCODE_DIR/plugins/"
                 log_success "Copied plugin: $plugin_name"
@@ -391,6 +395,24 @@ copy_files() {
         fi
     else
         log_warning "plugins directory not found in plugin (optional feature)"
+    fi
+
+    # The plugin entry point imports its hooks locally; install them in every mode.
+    if [ -d "$PLUGIN_DIR/.opencode/hooks" ]; then
+        mkdir -p "$OPENCODE_DIR/hooks"
+        for hook_file in "$PLUGIN_DIR/.opencode/hooks"/*.ts; do
+            case "$hook_file" in *.test.ts) continue ;; esac
+            cp "$hook_file" "$OPENCODE_DIR/hooks/"
+        done
+    fi
+
+    # Auto-discovered TypeScript plugins require the OpenCode plugin helper and YAML parser.
+    if [ -f "$PLUGIN_DIR/.opencode/plugin-dependencies.json" ]; then
+        if [ ! -f "$OPENCODE_DIR/package.json" ]; then
+            cp "$PLUGIN_DIR/.opencode/plugin-dependencies.json" "$OPENCODE_DIR/package.json"
+        else
+            log_warning "Existing .opencode/package.json preserved; ensure @opencode-ai/plugin and yaml are installed"
+        fi
     fi
 }
 

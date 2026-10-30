@@ -116,6 +116,8 @@ Before starting any work, you MUST capture user context to ensure proper isolati
 
 **All subsequent work must use**: `/shared/user_impl_alpha/{user_email}/{project_slug}/` as the project root directory.
 
+When running with the installed ART sync plugin, call `art_sync_bind` once for the current local OpenCode folder using this email and slug. Use local project-relative paths (`scripts/`, `data/`, `outputs/`) when creating inputs, and call `art_sync_include` for root-level deliverables or other directories (`lh_outputs/`, `final_files/`) that should upload. Before cloud execution the plugin reconciles project files, and after execution it downloads cloud results. If sync returns conflicts, inspect the local original and the temporary cloud preview, then ask the user which copy to keep and call `art_sync_resolve`; do not pick a side automatically. A remote `/shared/...` path is for art-core execution, not for local file editing. To refresh outputs explicitly, use `art_sync`.
+
 This is a critical requirement to avoid cross-project contamination and ensure user isolation.
 
 ---

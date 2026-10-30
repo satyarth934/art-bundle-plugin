@@ -3,7 +3,7 @@
  */
 
 import type { InterceptEvent } from "./types";
-import { fileLog } from "./file-logger";
+import { fileLog } from "./file-logger.ts";
 
 export async function logIntercept(
   event: InterceptEvent,
