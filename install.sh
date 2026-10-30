@@ -408,10 +408,32 @@ copy_files() {
 
     # Auto-discovered TypeScript plugins require the OpenCode plugin helper and YAML parser.
     if [ -f "$PLUGIN_DIR/.opencode/plugin-dependencies.json" ]; then
+        cp "$PLUGIN_DIR/.opencode/plugin-dependencies.json" "$OPENCODE_DIR/plugin-dependencies.json"
         if [ ! -f "$OPENCODE_DIR/package.json" ]; then
             cp "$PLUGIN_DIR/.opencode/plugin-dependencies.json" "$OPENCODE_DIR/package.json"
+            log_success "Created .opencode/package.json from plugin dependency manifest"
         else
-            log_warning "Existing .opencode/package.json preserved; ensure @opencode-ai/plugin and yaml are installed"
+            if command -v python3 &> /dev/null; then
+                MISSING_PLUGIN_DEPS=$(python3 - "$OPENCODE_DIR/package.json" "$PLUGIN_DIR/.opencode/plugin-dependencies.json" <<'PY'
+import json, sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    installed = json.load(stream)
+with open(sys.argv[2], encoding="utf-8") as stream:
+    required = json.load(stream)
+installed_deps = {**installed.get("dependencies", {}), **installed.get("devDependencies", {})}
+print(" ".join(f"{name}@{version}" for name, version in required.get("dependencies", {}).items() if installed_deps.get(name) != version))
+PY
+                )
+                if [ -n "$MISSING_PLUGIN_DEPS" ]; then
+                    log_warning "Existing .opencode/package.json preserved; missing or mismatched plugin dependencies: $MISSING_PLUGIN_DEPS"
+                    log_info "Install the required dependencies with: npm install --prefix .opencode $MISSING_PLUGIN_DEPS"
+                else
+                    log_success "Existing .opencode/package.json preserved and required plugin dependencies are present"
+                fi
+            else
+                log_warning "Existing .opencode/package.json preserved; install dependencies listed in .opencode/plugin-dependencies.json"
+            fi
         fi
     fi
 }
