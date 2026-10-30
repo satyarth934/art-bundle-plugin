@@ -19,6 +19,12 @@ tools:
   ListMcpResourcesTool: true
   ReadMcpResourceTool: true
   mcp__art_mcp__execute_code: true
+  art_sync: false
+  art_sync_bind: false
+  art_sync_rebind: false
+  art_sync_include: false
+  art_sync_resolve: false
+  art_sync_resolve_batch: false
 mode: subagent
 # model: gemini-flash
 color: "#27ae60"
@@ -35,13 +41,18 @@ This agent receives the following context from the dispatcher:
 ### File Path Management
 
 All file operations must respect user isolation:
-- **Project root**: `/shared/user_impl_alpha/{user_email}/{project_slug}/`
+- **Runtime project root**: `os.environ["ARTMCP_PROJECT_ROOT"]`
+- **Runtime identity**: `ARTMCP_USER_EMAIL` and `ARTMCP_PROJECT_SLUG` in the script environment
 - **Use MCP tools**: `upload_script()`, `upload_data_file()` with user_email + project_slug parameters
-- **Never assume paths** — always construct them with user context
+- **Never hardcode identity or paths** — use the dispatcher's binding for MCP arguments and runtime environment variables inside scripts
 
 Example (correct):
 ```python
-project_root = f"/shared/user_impl_alpha/{user_email}/{project_slug}"
+import os
+
+user_email = os.environ["ARTMCP_USER_EMAIL"]
+project_slug = os.environ["ARTMCP_PROJECT_SLUG"]
+project_root = os.environ["ARTMCP_PROJECT_ROOT"]
 script_path = f"{project_root}/scripts/my_script.py"
 output_path = f"{project_root}/outputs/robotic_instructions.csv"
 ```
@@ -55,10 +66,10 @@ output_path = f"{project_root}/outputs/robotic_instructions.csv"
 - `list_shared_files(user_email, project_slug)` — lists user's files only
 - `download_file(filepath)` — returns file if user has access
 
-⚪ **GENERAL TOOLS** (not user-specific, but paths determine isolation):
-- `execute_code(script_path)` — runs script in art-core; user isolation determined by path
+⚪ **GENERAL TOOLS** (the sync plugin supplies and verifies the bound identity):
+- `execute_code(script_path)` — runs the selected project script in art-core; do not pass a different `user_email` or `project_slug`
 
-Always construct paths with user context, and use USER-AWARE tools when available.
+Use the dispatcher's bound identity for user-aware tools. Inside generated scripts, construct paths from the `ARTMCP_*` execution environment variables; do not copy an email, slug, or shared path literal from another run.
 
 ### Reference Documents — Read These First
 
@@ -104,8 +115,10 @@ Before finalizing, you MUST write a validation script (e.g., `validate_outputs.p
 4.  **Accuracy**: Back-calculate concentrations from the instruction CSV to ensure they match the Target Recommendations within 1% error.
 
 **Execution Workflow:**
-1.  **Run via MCP**: Use the `art_mcp` `execute_code` tool for all scripts to ensure dependency alignment.
+1.  **Run via MCP**: Use the `art_mcp` `execute_code` tool for all scripts to ensure dependency alignment. The plugin injects the local folder's canonical user/project identity and rejects mismatched paths or source literals.
 2.  **Export**: Save `stock_concentrations.csv`, `source_plate_map.csv`, and `robotic_instructions.csv` to the project directory.
+
+**Sync ownership:** Do not call `art_sync`, `art_sync_bind`, `art_sync_rebind`, or conflict-resolution tools. The main orchestrator performs full syncs at phase handoffs; `execute_code` performs only the targeted script check.
 
 **Inviolable Path Rule**: Every script you write and every output file you produce MUST be saved inside the project root defined in the File Path Management section above. Never write to any path outside the project directory. If the project slug has not been provided by the orchestrator, ask for it before writing any file. Do not guess or use a default path.
 

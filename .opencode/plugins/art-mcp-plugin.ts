@@ -12,6 +12,22 @@ import type { MCPConfig } from "../hooks/types.ts";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+function verifyScriptIdentity(source: string, email: string, slug: string) {
+  const literalAssignments = [
+    {pattern: /\b(?:ARTMCP_)?USER_EMAIL\s*(?::[^=\n]+)?=\s*(["'])([^"']+)\1/g, expected: email},
+    {pattern: /\b(?:ARTMCP_)?PROJECT_SLUG\s*(?::[^=\n]+)?=\s*(["'])([^"']+)\1/g, expected: slug},
+  ];
+  for (const {pattern, expected} of literalAssignments) {
+    for (const match of source.matchAll(pattern)) {
+      if (match[2] !== expected) throw new Error("Script source identity does not match the bound ART project");
+    }
+  }
+  const paths = /\/shared\/user_impl_alpha\/([^/\s"'`]+)\/([^/\s"'`]+)(?=\/|["'`\s]|$)/g;
+  for (const match of source.matchAll(paths)) {
+    if (match[1] !== email || match[2] !== slug) throw new Error("Script source path does not match the bound ART project");
+  }
+}
+
 /**
  * ARTBundlePlugin
  * Detects deployment mode at startup, then registers container path guard hooks.
@@ -33,6 +49,11 @@ export const ARTBundlePlugin: Plugin = async (ctx: PluginInput) => {
           if (!state) throw new Error("Bind the project first");
           return createSyncTransport(mcpConfig!.url, process.env.ARTMCP_AUTH_API_KEY!, state.email, state.slug).inventory();
         },
+        async stat(name: string) {
+          const state = await current!.binding();
+          if (!state) throw new Error("Bind the project first");
+          return createSyncTransport(mcpConfig!.url, process.env.ARTMCP_AUTH_API_KEY!, state.email, state.slug).stat(name);
+        },
         async download(file: any) {
           const state = await current!.binding();
           return createSyncTransport(mcpConfig!.url, process.env.ARTMCP_AUTH_API_KEY!, state!.email, state!.slug).download(file);
@@ -50,49 +71,46 @@ export const ARTBundlePlugin: Plugin = async (ctx: PluginInput) => {
   const summarize = (result: Awaited<ReturnType<ReturnType<typeof createSyncEngine>["sync"]>>) =>
     JSON.stringify(result, null, 2);
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let writeWait: Promise<void> | undefined;
-  let resolveWriteWait: (() => void) | undefined;
-  const writeDelay = () => {
-    if (!writeWait) writeWait = new Promise<void>(resolve => { resolveWriteWait = resolve; });
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => { resolveWriteWait?.(); writeWait = undefined; resolveWriteWait = undefined; }, 500);
-    return writeWait;
-  };
+  let writeFlush: Promise<any> | undefined;
+  const pendingWrites = new Set<string>();
   const inProject = (name: string) => {
     const relative = path.relative(ctx.directory, name).split(path.sep).join("/");
     return relative && !relative.startsWith("..") && !relative.startsWith(".opencode/") && !relative.startsWith(".git/") && !path.isAbsolute(relative);
   };
+  const flushQueuedWrites = async (active: ReturnType<typeof createSyncEngine>, additional: string[] = []) => {
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+    if (writeFlush) await writeFlush;
+    const paths = [...new Set([...pendingWrites, ...additional])];
+    pendingWrites.clear();
+    if (!paths.length || !(await active.binding())) return undefined;
+    const task = (async () => {
+      const result = await active.syncPaths(paths);
+      if (result.conflicts.length || result.failed.length) fileLog(`Targeted write sync needs attention: ${summarize(result)}`);
+      return result;
+    })();
+    writeFlush = task;
+    try { return await task; }
+    finally { if (writeFlush === task) writeFlush = undefined; }
+  };
+  const queueWrite = (relative: string) => {
+    if (!relative || relative.startsWith("../") || relative.startsWith(".opencode/") || relative.startsWith(".git/")) return;
+    pendingWrites.add(relative);
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = undefined;
+      void flushQueuedWrites(engine(ctx.directory)).catch(() => fileLog("Targeted write sync failed; run art_sync to retry"));
+    }, 500);
+  };
   const sessions = new Set<string>();
-  const failedCalls = new Set<string>();
 
   return {
     ...guards,
     event: async ({event}) => {
-      if (event.type === "message.part.updated" && mcpConfig) {
-        const part = event.properties.part;
-        if (part.type === "tool" && part.tool.endsWith("execute_code") && part.state.status === "error" && !failedCalls.has(part.callID)) {
-          failedCalls.add(part.callID);
-          const active = engine(ctx.directory);
-          try {
-            if (await active.binding()) {
-              const result = await active.sync();
-              if (result.failed.length || result.conflicts.length) fileLog(`Failed execution sync needs attention: ${summarize(result)}`);
-            }
-          } catch { fileLog("Failed execution sync unavailable; run art_sync to retry"); }
-        }
-        return;
-      }
       if (event.type === "file.edited" && mcpConfig) {
         const file = event.properties.file;
         if (inProject(file)) {
-          void (async () => {
-            await writeDelay();
-            const active = engine(ctx.directory);
-            if (await active.binding()) {
-              const result = await active.sync();
-              if (result.conflicts.length || result.failed.length) fileLog(`File edit sync needs attention: ${summarize(result)}`);
-            }
-          })().catch(() => fileLog("File edit sync failed; run art_sync to retry"));
+          queueWrite(path.relative(ctx.directory, file).split(path.sep).join("/"));
         }
         return;
       }
@@ -101,7 +119,9 @@ export const ARTBundlePlugin: Plugin = async (ctx: PluginInput) => {
         return;
       }
       if (event.type !== "session.created" || !mcpConfig) return;
-      const id = (event as any).properties?.info?.id;
+      const info = (event as any).properties?.info;
+      if (info?.parentID || info?.parent_id) return;
+      const id = info?.id;
       if (!id || sessions.has(id)) return;
       sessions.add(id);
       const active = engine(ctx.directory);
@@ -125,7 +145,15 @@ export const ARTBundlePlugin: Plugin = async (ctx: PluginInput) => {
       art_sync: tool({
         description: "Reconcile local and cloud project files. Returns conflict preview paths; does not overwrite conflicts.",
         args: {},
-        async execute(_args, context) { return summarize(await engine(context.directory).sync()); },
+        async execute(_args, context) {
+          context.metadata?.({title: "ART sync: scanning cloud inventory"});
+          const result = await engine(context.directory).sync();
+          context.metadata?.({
+            title: `ART sync: ${result.downloaded.length} downloaded, ${result.uploaded.length} uploaded, ${result.newConflicts.length} new conflicts`,
+            metadata: {downloaded: result.downloaded.length, uploaded: result.uploaded.length, newConflicts: result.newConflicts.length, pendingConflicts: result.pendingConflicts.length, failed: result.failed.length},
+          });
+          return summarize(result);
+        },
       }),
       art_sync_rebind: tool({
         description: "Explicitly switch this local folder to a different ART project; clears prior sync history without deleting local files.",
@@ -148,6 +176,18 @@ export const ARTBundlePlugin: Plugin = async (ctx: PluginInput) => {
           return `Resolved ${args.path} using ${args.choice}`;
         },
       }),
+      art_sync_resolve_batch: tool({
+        description: "Resolve the pending conflict batch with one default choice and optional per-path overrides; defer keeps conflicts pending.",
+        args: {
+          default_choice: tool.schema.enum(["cloud", "local", "defer"]),
+          per_path_choices_json: tool.schema.string().optional(),
+        },
+        async execute(args, context) {
+          const perPathChoices = args.per_path_choices_json ? JSON.parse(args.per_path_choices_json) : {};
+          const result = await engine(context.directory).resolveBatch({defaultChoice: args.default_choice, perPathChoices});
+          return JSON.stringify(result, null, 2);
+        },
+      }),
     },
     "tool.execute.before": async (input, output) => {
       await guards["tool.execute.before"]?.(input, output);
@@ -158,48 +198,57 @@ export const ARTBundlePlugin: Plugin = async (ctx: PluginInput) => {
           if (!relative.startsWith(".opencode/") && !relative.startsWith(".git/") && !relative.includes("../")) {
             const active = engine(ctx.directory);
             if (await active.binding()) {
-              const result = await active.sync();
+              const result = await active.syncPaths([relative]);
               if (result.conflicts.length || result.failed.length) fileLog(`Missing-file sync needs attention: ${summarize(result)}`);
             }
           }
         }
-      }
-      if (!mcpConfig || !input.tool.endsWith("execute_code") || !output.args?.script_path) return;
-      if (timer) { clearTimeout(timer); timer = undefined; resolveWriteWait?.(); writeWait = undefined; resolveWriteWait = undefined; }
-      const active = engine(ctx.directory);
-      const binding = await active.binding();
-      if (!binding) throw new Error("Bind this folder with art_sync_bind before execute_code");
-      const expected = `/shared/user_impl_alpha/${binding.email}/${binding.slug}/`;
-      if (typeof output.args.script_path !== "string" || !output.args.script_path.startsWith(expected) || output.args.script_path.split("/").includes("..")) throw new Error("Script path must be inside the bound project");
-      const result = await active.sync();
-      if (result.conflicts.length || result.failed.length) throw new Error(`Resolve sync problems before execution: ${summarize(result)}`);
+       }
+       if (!mcpConfig || !input.tool.endsWith("execute_code") || !output.args?.script_path) return;
+       const active = engine(ctx.directory);
+       const binding = await active.binding();
+       if (!binding) throw new Error("Bind this folder with art_sync_bind before execute_code");
+       for (const key of ["user_email", "project_slug"] as const) {
+         const expectedValue = key === "user_email" ? binding.email : binding.slug;
+         if (output.args[key] !== undefined && output.args[key] !== expectedValue) throw new Error(`execute_code ${key} does not match the folder binding`);
+         output.args[key] = expectedValue;
+       }
+       const expected = `/shared/user_impl_alpha/${binding.email}/${binding.slug}/`;
+       if (typeof output.args.script_path !== "string" || !output.args.script_path.startsWith(expected) || output.args.script_path.split("/").includes("..")) throw new Error("Script path must be inside the bound project");
+        const relative = output.args.script_path.slice(expected.length);
+        if (!relative.startsWith("scripts/") || path.posix.isAbsolute(relative)) throw new Error("Execution requires a project-relative scripts/ path");
+        const readBoundScript = async () => {
+          let full = ctx.directory;
+          const parts = relative.split("/");
+          for (const [index, part] of parts.entries()) {
+            full = path.join(full, part);
+            const stat = await fs.lstat(full).catch(() => undefined);
+            if (!stat) return undefined;
+            if (stat.isSymbolicLink()) throw new Error("Execution script may not use symlinks");
+            if (index < parts.length - 1 && !stat.isDirectory()) throw new Error("Execution script path is not a file path");
+            if (index === parts.length - 1 && !stat.isFile()) throw new Error("Execution script path is not a regular file");
+          }
+          return fs.readFile(full, "utf8");
+        };
+        const localSource = await readBoundScript();
+        if (localSource !== undefined) verifyScriptIdentity(localSource, binding.email, binding.slug);
+        const result = await flushQueuedWrites(active, [relative]);
+        if (!result) throw new Error("Targeted script sync did not run");
+        const targetConflict = result.pendingConflicts.find(conflict => conflict.path === relative);
+        const targetFailure = result.failed.find(failure => failure.path === relative);
+        if (targetConflict || targetFailure) throw new Error(`Target script needs sync attention before execution: ${summarize(result)}`);
+        if (result.conflicts.length || result.failed.length) fileLog(`Unrelated targeted sync needs attention: ${summarize(result)}`);
+        const finalSource = await readBoundScript();
+        if (finalSource === undefined) throw new Error("Target script is missing from the bound project");
+        verifyScriptIdentity(finalSource, binding.email, binding.slug);
     },
     "tool.execute.after": async (input, output) => {
       if (!mcpConfig) return;
-      if (input.tool.endsWith("execute_code")) {
-        const active = engine(ctx.directory);
-        if (await active.binding()) {
-          try {
-            const result = await active.sync();
-            if (result.failed.length || result.conflicts.length) output.output += `\nART sync needs attention: ${summarize(result)}`;
-          } catch (error) {
-            output.output += `\nART sync failed after execution: ${String(error)}`;
-          }
-        }
-      } else if (["write", "edit", "apply_patch"].includes(input.tool)) {
+      if (["write", "edit", "apply_patch"].includes(input.tool)) {
         const target = input.args?.filePath;
         if (typeof target !== "string") return;
         const relative = path.relative(ctx.directory, target).split(path.sep).join("/");
-        if (relative.startsWith("..") || relative.startsWith(".opencode/") || relative.startsWith(".git/")) return;
-        await writeDelay();
-        const active = engine(ctx.directory);
-        if (!(await active.binding())) return;
-        try {
-          const result = await active.sync();
-          if (result.conflicts.length || result.failed.length) output.output += `\nART sync needs attention: ${summarize(result)}`;
-        } catch {
-          output.output += "\nART sync failed after write; run art_sync to retry";
-        }
+        queueWrite(relative);
       }
     },
     config: async (config: Config) => {

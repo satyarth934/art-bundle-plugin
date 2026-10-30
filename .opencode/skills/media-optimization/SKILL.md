@@ -114,11 +114,29 @@ Before starting any work, you MUST capture user context to ensure proper isolati
    - Used to organize files: `/shared/user_impl_alpha/{email}/{slug}/`
    - Example: `media_opt_v2`
 
-**All subsequent work must use**: `/shared/user_impl_alpha/{user_email}/{project_slug}/` as the project root directory.
+The bound project identity is passed to `execute_code` by the plugin. In generated scripts, use `ARTMCP_USER_EMAIL`, `ARTMCP_PROJECT_SLUG`, and `ARTMCP_PROJECT_ROOT` from the execution environment rather than interpolating a remembered email or slug.
 
-When running with the installed ART sync plugin, call `art_sync_bind` once for the current local OpenCode folder using this email and slug. Use local project-relative paths (`scripts/`, `data/`, `outputs/`) when creating inputs, and call `art_sync_include` for root-level deliverables or other directories (`lh_outputs/`, `final_files/`) that should upload. Before cloud execution the plugin reconciles project files, and after execution it downloads cloud results. If sync returns conflicts, inspect the local original and the temporary cloud preview, then ask the user which copy to keep and call `art_sync_resolve`; do not pick a side automatically. A remote `/shared/...` path is for art-core execution, not for local file editing. To refresh outputs explicitly, use `art_sync`.
+When running with the installed ART sync plugin, call `art_sync_bind` once for the current local OpenCode folder using this email and slug. Use project-relative paths (`scripts/`, `data/`, `outputs/`) for local files, and call `art_sync_include` for root-level deliverables or other directories (`lh_outputs/`, `final_files/`) that should upload. The plugin binds `execute_code` to this project identity and synchronizes only its target script before execution. The main orchestrator calls `art_sync` at project phase handoffs to reconcile phase outputs. If a later sync returns conflicts, inspect the local original and cloud version, then choose a batch resolution or defer without silently choosing a side. A remote `/shared/...` path is for art-core execution, not local file editing.
+
+Generated Python scripts MUST derive project paths from the runtime identity supplied by art-core; never copy an email, slug, or project path from an example or an earlier run:
+
+```python
+import os
+
+USER_EMAIL = os.environ["ARTMCP_USER_EMAIL"]
+PROJECT_SLUG = os.environ["ARTMCP_PROJECT_SLUG"]
+PROJECT_ROOT = os.environ["ARTMCP_PROJECT_ROOT"]
+```
 
 This is a critical requirement to avoid cross-project contamination and ensure user isolation.
+
+### ART Sync Checkpoints (Main Orchestrator Only)
+
+1. At pipeline start, bind the local folder if needed and run one full `art_sync` before reading or dispatching work that depends on project files. `art_sync_bind` performs the initial bootstrap itself; do not immediately repeat that scan in the same startup.
+2. Before dispatching a later phase that consumes files produced or edited since the previous checkpoint, run `art_sync` once and inspect its batch summary.
+3. After every output-producing phase, run `art_sync` before the parent reads or dispatches those outputs. Do this after failed executions too, because partial files may have been written.
+4. Only the main orchestrator calls full `art_sync` and resolves batches. Review the local originals and cloud versions, then call `art_sync_resolve_batch` with one default choice (`cloud`, `local`, or `defer`) and optional JSON per-path overrides. Deferred conflicts remain pending; never silently choose a copy.
+5. Specialist sub-agents do not call full-sync or conflict-resolution tools. Their `execute_code` calls use the plugin's targeted script check; unrelated project conflicts do not block them.
 
 ---
 
@@ -480,7 +498,7 @@ Every script written or executed for a project must use the project directory as
 /shared/user_impl_alpha/{user_email}/{project_slug}/final_files/   ← final deliverables
 ```
 
-**Never write scripts or outputs outside the project root.** When adapting a template, replace `{user_email}` and `{project_slug}` with the actual user email and project slug (e.g., `alice@example.com` and `media_opt_20260305_run01`). If either is not known, ask the orchestrator — do not guess or use a default path.
+**Never write scripts or outputs outside the project root.** In generated code, read the runtime project identity from the three `ARTMCP_*` environment variables above. Do not hardcode user emails, project slugs, or `/shared/user_impl_alpha/...` paths; the execution preflight rejects literals that disagree with the current binding. If a local folder is not yet bound, ask the orchestrator to bind it before execution.
 
 ### 2. Volume Calculations -- Use `media_compiler/core.py` FIRST
 

@@ -20,6 +20,12 @@ tools:
   ReadMcpResourceTool: true
   mcp__art_mcp__execute_code: true
   mcp__art_mcp__answer_question: true
+  art_sync: false
+  art_sync_bind: false
+  art_sync_rebind: false
+  art_sync_include: false
+  art_sync_resolve: false
+  art_sync_resolve_batch: false
 mode: subagent
 # model: gemini-flash
 color: "#3498db"
@@ -36,13 +42,18 @@ This agent receives the following context from the dispatcher:
 ### File Path Management
 
 All file operations must respect user isolation:
-- **Project root**: `/shared/user_impl_alpha/{user_email}/{project_slug}/`
+- **Runtime project root**: `os.environ["ARTMCP_PROJECT_ROOT"]`
+- **Runtime identity**: `ARTMCP_USER_EMAIL` and `ARTMCP_PROJECT_SLUG` in the script environment
 - **Use MCP tools**: `upload_script()`, `upload_data_file()` with user_email + project_slug parameters
-- **Never assume paths** — always construct them with user context
+- **Never hardcode identity or paths** — use the dispatcher's binding for MCP arguments and runtime environment variables inside scripts
 
 Example (correct):
 ```python
-project_root = f"/shared/user_impl_alpha/{user_email}/{project_slug}"
+import os
+
+user_email = os.environ["ARTMCP_USER_EMAIL"]
+project_slug = os.environ["ARTMCP_PROJECT_SLUG"]
+project_root = os.environ["ARTMCP_PROJECT_ROOT"]
 script_path = f"{project_root}/scripts/art_optimization.py"
 output_path = f"{project_root}/outputs/recommendations_current_cycle.csv"
 ```
@@ -56,10 +67,10 @@ output_path = f"{project_root}/outputs/recommendations_current_cycle.csv"
 - `list_shared_files(user_email, project_slug)` — lists user's files only
 - `download_file(filepath)` — returns file if user has access
 
-⚪ **GENERAL TOOLS** (not user-specific, but paths determine isolation):
-- `execute_code(script_path)` — runs script in art-core; user isolation determined by path
+⚪ **GENERAL TOOLS** (the sync plugin supplies and verifies the bound identity):
+- `execute_code(script_path)` — runs the selected project script in art-core; do not pass a different `user_email` or `project_slug`
 
-Always construct paths with user context, and use USER-AWARE tools when available.
+Use the dispatcher's bound identity for user-aware tools. Inside generated scripts, construct paths from the `ARTMCP_*` execution environment variables; do not copy an email, slug, or shared path literal from another run.
 
 
 ### ART API Reference
@@ -75,7 +86,8 @@ The ART Python package is available in the art-core execution environment. You m
 For deeper API documentation, use the appropriate ART MCP resources.
 
 ### Mandatory Tool Protocol
-- **Execution Environment**: Write your script using the ART API above. Upload it to the project root via `upload_script()`. Run it via `execute_code()`. The art-core execution environment has `art` available on its Python path — no path setup needed in your scripts. If `execute_code()` returns an error, read the stderr output, fix the script, and re-run. Do not attempt to read or navigate any files outside your project root.
+- **Execution Environment**: Write your script using the ART API above. Upload it to the bound project via `upload_script()`. Run it via `execute_code()` using the bound script path. The plugin supplies identity fields from the local binding and blocks mismatched source literals. The art-core execution environment has `art` available on its Python path — no path setup needed in your scripts. If `execute_code()` returns an error, read the stderr output, fix the script, and re-run. Do not attempt to read or navigate any files outside your project root.
+- **Sync ownership**: Do not call `art_sync`, `art_sync_bind`, `art_sync_rebind`, or conflict-resolution tools. The main orchestrator performs full syncs at phase handoffs; `execute_code` performs only the targeted script check.
 - **Path Injection**: The art-core execution environment automatically configures `PYTHONPATH` for every execution. You do NOT need to add `sys.path.append` at the top of generated scripts.
 
 ### Operational Guardrails
