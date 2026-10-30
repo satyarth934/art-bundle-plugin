@@ -11,7 +11,8 @@
       "type": "remote",
       
       // URL: GCP Cloud Run hosted ART-MCP service
-      "url": "https://art-mcp-1005318772721.us-west1.run.app/mcp",
+      // "url": "https://art-mcp-1005318772721.us-west1.run.app/mcp",
+      "url": "https://art-mcp-staging-1005318772721.us-west1.run.app/mcp",
       
       // Authentication: API key from environment variable
       // Users must set: export ARTMCP_AUTH_API_KEY="your-api-key"

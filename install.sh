@@ -73,7 +73,7 @@ REPO_OWNER="satyarth934"
 REPO_NAME="art-bundle-plugin"
 REPO="${REPO_OWNER}/${REPO_NAME}"
 REPO_URL="https://github.com/${REPO}"
-ART_MCP_URL="https://art-mcp-1005318772721.us-west1.run.app/mcp"
+ART_MCP_URL="https://art-mcp-staging-1005318772721.us-west1.run.app/mcp"
 
 # ============================================================================
 # Argument Parsing & Environment Detection
