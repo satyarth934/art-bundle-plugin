@@ -55,6 +55,21 @@ test("transport maps a missing project-scoped stat to undefined", async () => {
   assert.equal(await transport.stat("scripts/missing.py"), undefined);
 });
 
+test("transport initializes its bound ART project through the MCP control plane", async () => {
+  let request: any;
+  const fetcher = async (_url: string, init: any) => {
+    request = JSON.parse(init.body);
+    return new Response(JSON.stringify({jsonrpc: "2.0", id: request.id, result: {content: [{type: "text", text: JSON.stringify({initialized: true})}]}}));
+  };
+  const transport = createSyncTransport("https://mcp.example/mcp", "key", "alice@example.com", "demo", fetcher as typeof fetch);
+
+  await transport.initialize();
+
+  assert.equal(request.params.name, "sync_project_initialize");
+  assert.equal(request.params.arguments.user_email, "alice@example.com");
+  assert.equal(request.params.arguments.project_slug, "demo");
+});
+
 test("transport preserves null in a FastMCP structured stat result", async () => {
   const fetcher = async (_url: string, init: any) => {
     const req = JSON.parse(init.body);

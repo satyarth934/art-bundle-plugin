@@ -21,6 +21,7 @@ function verify(bytes: Buffer, file: CloudFile) {
 
 export type CloudFile = { path: string; size: number; crc32c: string; generation: string };
 export type SyncTransport = {
+  initialize?(email: string, slug: string): Promise<void>;
   inventory(): Promise<CloudFile[]>;
   stat(path: string): Promise<CloudFile | undefined>;
   download(file: CloudFile): Promise<Buffer>;
@@ -78,6 +79,11 @@ export function createSyncEngine(root: string, transport: SyncTransport) {
   let running: Promise<SyncResult> | undefined;
   let rerun = false;
   const previews = new Map<string, Conflict>();
+  const ensureProjectDirectories = async () => {
+    await Promise.all(["scripts", "data", "outputs", "logs"].map((directory) =>
+      fs.mkdir(path.join(root, directory), {recursive: true})
+    ));
+  };
   const load = async (): Promise<State | undefined> => fs.readFile(stateFile, "utf8").then(JSON.parse, () => undefined);
   const save = async (state: State) => {
     await fs.mkdir(path.dirname(stateFile), { recursive: true });
@@ -295,15 +301,23 @@ export function createSyncEngine(root: string, transport: SyncTransport) {
     async rebind(email: string, slug: string) {
       if (!/^[^/\s@]+@[^/\s@]+\.[^/\s@]+$/.test(email) || !/^[a-z0-9][a-z0-9_-]*$/.test(slug)) throw new Error("Invalid email or project slug");
       if (running) await running;
-      const old = await load();
-      if (old?.email === email && old?.slug === slug) return;
-      await save({email, slug, records: {}, includes: [], bootstrapCompleted: false});
+      return queueProject(root, async () => {
+        const old = await load();
+        await transport.initialize?.(email, slug);
+        await ensureProjectDirectories();
+        if (old?.email === email && old?.slug === slug) return;
+        await save({email, slug, records: {}, includes: [], bootstrapCompleted: false});
+      });
     },
     async bind(email: string, slug: string) {
       if (!/^[^/\s@]+@[^/\s@]+\.[^/\s@]+$/.test(email) || !/^[a-z0-9][a-z0-9_-]*$/.test(slug)) throw new Error("Invalid email or project slug");
-      const old = await load();
-      if (old && (old.email !== email || old.slug !== slug)) throw new Error("Folder already bound; explicitly unbind before changing projects");
-      await save(old ?? { email, slug, records: {}, includes: [], bootstrapCompleted: false });
+      return queueProject(root, async () => {
+        const old = await load();
+        if (old && (old.email !== email || old.slug !== slug)) throw new Error("Folder already bound; explicitly unbind before changing projects");
+        await transport.initialize?.(email, slug);
+        await ensureProjectDirectories();
+        await save(old ?? { email, slug, records: {}, includes: [], bootstrapCompleted: false });
+      });
     },
     async include(name: string) {
       if (forbidden(name)) throw new Error("Invalid path");

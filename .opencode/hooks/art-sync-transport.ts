@@ -40,6 +40,9 @@ export function createSyncTransport(
   const authorize = (file: string, method: string, generation: string) =>
     call("sync_project_transfer", {path: file, method, generation});
   return {
+    async initialize() {
+      await call("sync_project_initialize", {});
+    },
     async inventory() {
       const files: CloudFile[] = [];
       let page_token: string | null = null;

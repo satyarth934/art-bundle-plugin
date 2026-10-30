@@ -44,6 +44,9 @@ export const ARTBundlePlugin: Plugin = async (ctx: PluginInput) => {
     let current = engines.get(directory);
     if (!current) {
       const transport = {
+        async initialize(email: string, slug: string) {
+          await createSyncTransport(mcpConfig!.url, process.env.ARTMCP_AUTH_API_KEY!, email, slug).initialize();
+        },
         async inventory() {
           const state = await current!.binding();
           if (!state) throw new Error("Bind the project first");

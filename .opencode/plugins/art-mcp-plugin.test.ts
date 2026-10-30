@@ -57,16 +57,48 @@ test("plugin registers explicit binding and sync tools in a local project", asyn
     await plugin.config?.({mcp: {"art-mcp": {type: "remote", url: "https://mcp.example/mcp"}}} as any);
     process.env.ARTMCP_AUTH_API_KEY = "test-key";
     const original = globalThis.fetch;
+    const calls: string[] = [];
     globalThis.fetch = async (_url, init) => {
       const request = JSON.parse(String(init?.body));
+      calls.push(request.params.name);
       return new Response(JSON.stringify({jsonrpc: "2.0", id: request.id, result: {content: [{type: "text", text: JSON.stringify({files: [], next_page_token: null})}]}}));
     };
     try {
       await plugin.tool!.art_sync_bind.execute({user_email: "alice@example.com", project_slug: "demo"}, {directory: root} as any);
+      assert.deepEqual(calls, ["sync_project_initialize", "sync_project_inventory"]);
     } finally { globalThis.fetch = original; delete process.env.ARTMCP_AUTH_API_KEY; }
     const state = JSON.parse(await fs.readFile(path.join(root, ".opencode/art-sync/state.json"), "utf8"));
     assert.equal(state.slug, "demo");
   } finally { await fs.rm(root, {recursive: true, force: true}); }
+});
+
+test("failed cloud initialization does not persist a local bind", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-plugin-test-"));
+  const previous = globalThis.fetch;
+  const oldKey = process.env.ARTMCP_AUTH_API_KEY;
+  try {
+    const plugin = await configuredPlugin(root);
+    process.env.ARTMCP_AUTH_API_KEY = "test-key";
+    let called = "";
+    globalThis.fetch = async (_url, init) => {
+      const request = JSON.parse(String(init?.body));
+      called = request.params.name;
+      return new Response(JSON.stringify({jsonrpc: "2.0", id: request.id, error: {code: -32000, message: "initialization failed"}}));
+    };
+
+    await assert.rejects(
+      plugin.tool!.art_sync_bind.execute({user_email: "alice@example.com", project_slug: "demo"}, {directory: root} as any),
+      /ART MCP sync operation failed/
+    );
+
+    assert.equal(called, "sync_project_initialize");
+    await assert.rejects(fs.readFile(path.join(root, ".opencode/art-sync/state.json")));
+  } finally {
+    globalThis.fetch = previous;
+    if (oldKey === undefined) delete process.env.ARTMCP_AUTH_API_KEY;
+    else process.env.ARTMCP_AUTH_API_KEY = oldKey;
+    await fs.rm(root, {recursive: true, force: true});
+  }
 });
 
 test("parent workflow owns full-sync checkpoints and specialists cannot call full-sync tools", async () => {

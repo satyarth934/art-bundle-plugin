@@ -398,6 +398,53 @@ test("bind refuses silent switch of cloud projects", async () => {
   } finally { await fs.rm(root, {recursive: true, force: true}); }
 });
 
+test("bind initializes cloud before saving state and creates standard local directories", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
+  const calls: string[] = [];
+  try {
+    const engine = createSyncEngine(root, {
+      initialize: async (email, slug) => {
+        calls.push(`initialize:${email}:${slug}`);
+        await assert.rejects(fs.stat(path.join(root, ".opencode/art-sync/state.json")));
+        for (const directory of ["scripts", "data", "outputs", "logs"]) {
+          await assert.rejects(fs.stat(path.join(root, directory)));
+        }
+      },
+      inventory: async () => [],
+      download: async () => Buffer.alloc(0),
+      upload: async () => "1",
+    });
+
+    await engine.bind("alice@example.com", "demo");
+
+    assert.deepEqual(calls, ["initialize:alice@example.com:demo"]);
+    for (const directory of ["scripts", "data", "outputs", "logs"]) {
+      assert.equal((await fs.stat(path.join(root, directory))).isDirectory(), true);
+    }
+    assert.equal((await engine.binding())?.slug, "demo");
+  } finally { await fs.rm(root, {recursive: true, force: true}); }
+});
+
+test("failed rebind initialization preserves the existing local binding state", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
+  try {
+    const engine = createSyncEngine(root, {
+      initialize: async (email) => { if (email === "bob@example.com") throw new Error("cloud unavailable"); },
+      inventory: async () => [],
+      download: async () => Buffer.alloc(0),
+      upload: async () => "1",
+    });
+    await engine.bind("alice@example.com", "demo");
+    await engine.include("final_files/report.md");
+    const stateBefore = await fs.readFile(path.join(root, ".opencode/art-sync/state.json"), "utf8");
+
+    await assert.rejects(engine.rebind("bob@example.com", "other"), /cloud unavailable/);
+
+    assert.equal(await fs.readFile(path.join(root, ".opencode/art-sync/state.json"), "utf8"), stateBefore);
+    assert.deepEqual(await engine.binding(), JSON.parse(stateBefore));
+  } finally { await fs.rm(root, {recursive: true, force: true}); }
+});
+
 test("one engine waits for a different engine syncing the same project folder", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
   try {
@@ -553,12 +600,14 @@ test("the previous cloud object remains available for download when only local f
 
 test("explicit rebind to the same project does not destroy sync history", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
+  let initializations = 0;
   try {
-    const engine = createSyncEngine(root, {inventory: async () => [], download: async () => Buffer.alloc(0), upload: async () => "1"});
+    const engine = createSyncEngine(root, {initialize: async () => { initializations++; }, inventory: async () => [], download: async () => Buffer.alloc(0), upload: async () => "1"});
     await engine.bind("alice@example.com", "demo");
     await engine.include("final_files/report.md");
     await engine.rebind("alice@example.com", "demo");
     assert.deepEqual((await engine.binding())?.includes, ["final_files/report.md"]);
+    assert.equal(initializations, 2);
   } finally { await fs.rm(root, {recursive: true, force: true}); }
 });
 
@@ -1189,9 +1238,26 @@ test("local edits to a previously synced script upload only the edited bytes", a
 test("two concurrent binds on the same local folder cannot point at different projects", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "art-sync-test-"));
   try {
-    const transport = {inventory: async () => [], download: async () => Buffer.alloc(0), upload: async () => "1"};
+    let releaseFirst!: () => void;
+    let firstInitializationStarted!: () => void;
+    const firstStarted = new Promise<void>(resolve => { firstInitializationStarted = resolve; });
+    const firstGate = new Promise<void>(resolve => { releaseFirst = resolve; });
+    const transport = {
+      initialize: async (email: string) => {
+        if (email === "alice@example.com") {
+          firstInitializationStarted();
+          await firstGate;
+        }
+      },
+      inventory: async () => [], download: async () => Buffer.alloc(0), upload: async () => "1",
+    };
     const a = createSyncEngine(root, transport), b = createSyncEngine(root, transport);
-    const results = await Promise.allSettled([a.bind("alice@example.com", "one"), b.bind("bob@example.com", "two")]);
+    const first = a.bind("alice@example.com", "one");
+    await firstStarted;
+    const second = b.bind("bob@example.com", "two");
+    await new Promise(resolve => setTimeout(resolve, 20));
+    releaseFirst();
+    const results = await Promise.allSettled([first, second]);
     assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
     assert.equal(results.filter(r => r.status === "rejected").length, 1);
   } finally { await fs.rm(root, {recursive: true, force: true}); }
